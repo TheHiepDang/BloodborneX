@@ -27,6 +27,7 @@ namespace BloodborneLauncher.Core
             ("dlss_preset", "k"),
             ("dlss_nr", "0"),
             ("dlss_nr_height", "720"),
+            ("dlss_nr_model_scale", "1.000"),
             ("dlss_nr_preset", "0"),
             ("dlss_nr_passes", "1"),
             ("dlss_nr_customize_passes", "0"),
@@ -55,6 +56,14 @@ namespace BloodborneLauncher.Core
             ("fps_text_opacity", "1.00"),
             ("fps_border", "1"),
         };
+
+        /// <summary>Global performance checkbox. Existing optimized INIs keep it enabled.</summary>
+        public bool NrPerformance
+        {
+            get => double.TryParse(Get("dlss_nr_model_scale", "1"), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var scale) && double.IsFinite(scale) && scale < 1;
+            set => Set("dlss_nr_model_scale", value ? "0.750" : "1.000");
+        }
 
         private readonly Dictionary<string, string?> _values = new(StringComparer.Ordinal);
         private List<string> _lines = new();

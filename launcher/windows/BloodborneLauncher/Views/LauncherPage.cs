@@ -549,7 +549,7 @@ namespace BloodborneLauncher.Views
         /// The chosen option's note shows under the row.</summary>
         protected FrameworkElement ComboRow(SymbolRegular icon, string title, string? hint, IReadOnlyList<Choice> choices,
             Func<string> get, Action<string> set, Panel? into = null, double width = 240, Action? changed = null,
-            Func<Choice, bool>? enabled = null)
+            Func<Choice, bool>? enabled = null, FrameworkElement? accessory = null)
         {
             TextBlock note = null!;
             void ShowNote(int index)
@@ -569,7 +569,7 @@ namespace BloodborneLauncher.Views
 
             var options = string.Join(" · ", choices.Select(c => c.Label));
             var shortLabels = choices.Sum(c => Segmented.Short(c.Label).Length);
-            if (!SettingRow.Classic && choices.Count is >= 2 and <= 6 && shortLabels <= 72)
+            if (accessory == null && !SettingRow.Classic && choices.Count is >= 2 and <= 6 && shortLabels <= 72)
             {
                 var segmented = new Segmented(choices, enabled);
                 var row = Add(Card(icon, title, hint, segmented, out note, wide: true), into);
@@ -585,7 +585,7 @@ namespace BloodborneLauncher.Views
             foreach (var choice in choices)
                 box.Items.Add(new ComboBoxItem { Content = choice.Label, Tag = choice.Value });
             ComboSearch.Attach(box);
-            var card = Add(Card(icon, title, hint, box, out note), into);
+            var card = Add(Card(icon, title, hint, accessory == null ? box : Row(box, accessory), out note), into);
             card.Choices = options;
             box.SelectedIndex = Choices.IndexOf(choices, get());
             ShowNote(box.SelectedIndex);

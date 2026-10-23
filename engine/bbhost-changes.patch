@@ -3580,7 +3580,7 @@ index 0000000..ca84e7a
 +OptiScaler's compatibility mode sends every submission from one thread while its frame generation
 +is on: players capped by it should try without OptiScaler's frame generation.
 diff --git a/gpu/CMakeLists.txt b/gpu/CMakeLists.txt
-index f51df72..dc1f2b1 100644
+index f51df72..8c8724a 100644
 --- a/gpu/CMakeLists.txt
 +++ b/gpu/CMakeLists.txt
 @@ -2,6 +2,11 @@
@@ -3687,7 +3687,7 @@ index f51df72..dc1f2b1 100644
  add_host_shader(upscale_reactive.comp upscale_reactive_comp)
  add_host_shader(taa.comp taa_comp)
  add_host_shader(taa_sharpen.comp taa_sharpen_comp)
-@@ -148,6 +184,10 @@ add_host_shader(taa_sharpen.comp taa_sharpen_ldr_comp LDR_OUTPUT=1)
+@@ -148,6 +184,11 @@ add_host_shader(taa_sharpen.comp taa_sharpen_ldr_comp LDR_OUTPUT=1)
  add_host_shader(fsr4_color.comp fsr4_decode_comp)
  add_host_shader(fsr4_color.comp fsr4_encode_comp ENCODE=1)
  add_host_shader(fsr4_reactive.comp fsr4_reactive_comp)
@@ -3695,10 +3695,11 @@ index f51df72..dc1f2b1 100644
 +add_host_shader(frame_gen_depth.comp frame_gen_depth_comp)
 +add_host_shader(dlss_ui_alpha.comp dlss_ui_alpha_comp)
 +add_host_shader(dlss_nr.comp dlss_nr_comp)
++add_host_shader(dlss_nr_scaled.comp dlss_nr_scaled_comp)
  add_host_shader(buffer_multi_copy.comp buffer_multi_copy_comp)
  add_host_shader(depth_resample.frag depth_resample_frag)
  add_host_shader(depth_resample.frag depth_stencil_resample_frag HAS_STENCIL=1)
-@@ -172,11 +212,15 @@ file(GLOB AVPLAYER CONFIGURE_DEPENDS shadps4/core/libraries/avplayer/*.cpp)
+@@ -172,11 +213,15 @@ file(GLOB AVPLAYER CONFIGURE_DEPENDS shadps4/core/libraries/avplayer/*.cpp)
  pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
  file(GLOB SHIM_SOURCES CONFIGURE_DEPENDS shim/*.cpp shim/*/*.cpp)
  if (WIN32)
@@ -3716,7 +3717,7 @@ index f51df72..dc1f2b1 100644
      set(BBGPU_LIBRARY_TYPE SHARED)
  endif()
  add_library(bbgpu ${BBGPU_LIBRARY_TYPE} ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOURCES}
-@@ -194,24 +238,42 @@ target_sources(bbgpu PRIVATE third_party/imgui/imgui.cpp third_party/imgui/imgui
+@@ -194,24 +239,42 @@ target_sources(bbgpu PRIVATE third_party/imgui/imgui.cpp third_party/imgui/imgui
      third_party/imgui/backends/imgui_impl_vulkan.cpp)
  target_include_directories(bbgpu PRIVATE third_party/imgui third_party/imgui/backends)
  target_compile_definitions(bbgpu PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES
@@ -3764,7 +3765,7 @@ index f51df72..dc1f2b1 100644
      # bb-probe.exe links libbbgpu.a with these (out/gpu/bbgpu_link.txt, one argument per line,
      # in link order): the static library's transitive dependencies.
      include(cmake/LinkClosure.cmake)
-@@ -242,6 +304,25 @@ target_link_libraries(pipeline-archive-test PRIVATE fmt::fmt)
+@@ -242,6 +305,25 @@ target_link_libraries(pipeline-archive-test PRIVATE fmt::fmt)
  add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
  target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
  target_include_directories(motion-history-test PRIVATE ..)
@@ -3790,7 +3791,7 @@ index f51df72..dc1f2b1 100644
  add_executable(motion-shader-test EXCLUDE_FROM_ALL ../tests/test_motion_shaders.cpp ../tests/test_gpu_runtime_stubs.cpp)
  target_compile_options(motion-shader-test PRIVATE -UNDEBUG)
  target_include_directories(motion-shader-test PRIVATE shim shadps4 third_party/gcn/include)
-@@ -252,7 +333,8 @@ endif()
+@@ -252,7 +334,8 @@ endif()
  add_executable(ui-composition-test EXCLUDE_FROM_ALL ../tests/test_ui_composition.cpp)
  target_compile_options(ui-composition-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
  target_include_directories(ui-composition-test PRIVATE ..)
@@ -3800,7 +3801,7 @@ index f51df72..dc1f2b1 100644
  target_compile_options(settings-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
  target_include_directories(settings-test PRIVATE .. shim)
  
-@@ -278,9 +360,23 @@ target_compile_options(camera-motion-test PRIVATE -UNDEBUG -fPIC)
+@@ -278,9 +361,23 @@ target_compile_options(camera-motion-test PRIVATE -UNDEBUG -fPIC)
  target_link_libraries(camera-motion-test PRIVATE bbgpu)
  add_dependencies(camera-motion-test host_shaders)
  
@@ -3825,7 +3826,7 @@ index f51df72..dc1f2b1 100644
  target_include_directories(upscaler-support-test PRIVATE shim)
  target_compile_options(upscaler-support-test PRIVATE -UNDEBUG)
  
-@@ -315,6 +411,7 @@ target_include_directories(pc-input-test PRIVATE shim)
+@@ -315,6 +412,7 @@ target_include_directories(pc-input-test PRIVATE shim)
  target_link_libraries(pc-input-test PRIVATE PkgConfig::SDL3)
  target_compile_options(pc-input-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
  add_executable(widescreen-test EXCLUDE_FROM_ALL ../tests/test_widescreen.cpp
@@ -62965,10 +62966,10 @@ index 72f2c43..73784e9 100644
 +
  } // namespace Vulkan
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_dlss.h b/gpu/shadps4/video_core/renderer_vulkan/vk_dlss.h
-index e9e3e99..ac050be 100644
+index e9e3e99..6b1fd43 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_dlss.h
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_dlss.h
-@@ -33,6 +33,33 @@ public:
+@@ -33,6 +33,35 @@ public:
      [[nodiscard]] const char* Problem() const noexcept;
      [[nodiscard]] bool Fatal() const noexcept;
  
@@ -62997,6 +62998,8 @@ index e9e3e99..ac050be 100644
 +    [[nodiscard]] const char* Problem() const noexcept;
 +    /// Encodes, evaluates feature 18, ratio-composes, then replaces frame.color before DLSS SR.
 +    bool Record(const Frame& frame);
++    /// Consume a request to reset downstream SR history after NR resources/content change.
++    bool ConsumeHistoryReset() noexcept;
 +    void ResetHistory() noexcept;
 +
  private:
@@ -63004,10 +63007,10 @@ index e9e3e99..ac050be 100644
      std::unique_ptr<Impl> impl;
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp
 new file mode 100644
-index 0000000..2b67769
+index 0000000..35b8cfa
 --- /dev/null
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp
-@@ -0,0 +1,586 @@
+@@ -0,0 +1,702 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +#include "video_core/renderer_vulkan/vk_dlss.h"
 +
@@ -63021,6 +63024,7 @@ index 0000000..2b67769
 +#include <mutex>
 +#include <string>
 +#include <tuple>
++#include <utility>
 +#include <vector>
 +#include <vk_mem_alloc.h>
 +
@@ -63034,6 +63038,7 @@ index 0000000..2b67769
 +
 +#include "bbport_settings.h"
 +#include "video_core/host_shaders/dlss_nr_comp.h"
++#include "video_core/host_shaders/dlss_nr_scaled_comp.h"
 +#include "video_core/renderer_vulkan/vk_instance.h"
 +#include "video_core/renderer_vulkan/vk_scheduler.h"
 +#include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -63092,6 +63097,7 @@ index 0000000..2b67769
 +    DlssUpscaler& dlss;
 +    std::string problem{"not initialized"};
 +    bool available = false, attempted = false, skip_first = false, history_reset = true;
++    bool sr_reset_pending = false;
 +    void* forwarder = nullptr;
 +    using Probe = int (*)(const wchar_t*);
 +    using Init = int (*)(const wchar_t*, const wchar_t*, void*, void*, void*, int);
@@ -63108,6 +63114,7 @@ index 0000000..2b67769
 +        u32 width{}, height{}; int preset{}, style{}; float intensity{}, structure{}, tone{}, skin{};
 +        bool auto_mask{}; int passes{1};
 +        std::array<BbSettings::DlssNrTuning, 2> extra{};
++        u32 scene_width{}, scene_height{};
 +        bool operator==(const Key&) const = default;
 +    } key{};
 +    VideoCore::UniqueImage proxy, original, model, resolved;
@@ -63123,10 +63130,18 @@ index 0000000..2b67769
 +    vk::UniqueDescriptorSetLayout descriptor_layout;
 +    vk::UniquePipelineLayout pipeline_layout;
 +    vk::UniquePipeline pipeline;
++    VideoCore::UniqueImage reduced_depth, reduced_motion;
++    vk::UniqueImageView reduced_depth_view, reduced_motion_view;
++    vk::UniqueDescriptorSetLayout scaled_descriptor_layout;
++    vk::UniquePipelineLayout scaled_pipeline_layout;
++    vk::UniquePipeline scaled_pipeline;
++    bool Scaled() const { return key.width != key.scene_width || key.height != key.scene_height; }
 +    vk::UniqueSampler sampler;
 +    vk::UniqueQueryPool timing_pool;
 +    std::array<u64, 4> timing_ticks{};
 +    u64 timing_frame = 0, timestamp_mask = ~u64(0);
++    const u32 timing_stride = std::getenv("BB_DLSS_NR_PROFILE") ? 5 : 2;
++    u64 timing_samples = 0;
 +    float timestamp_period = 0.0f;
 +    u32 diagnostic_frames = 0;
 +    u32 diagnostic_capture_serial = 0;
@@ -63252,13 +63267,31 @@ index 0000000..2b67769
 +            .stage = {.stage = vk::ShaderStageFlagBits::eCompute, .module = module, .pName = "main"},
 +            .layout = *pipeline_layout}));
 +        device.destroyShaderModule(module);
++        std::array<vk::DescriptorSetLayoutBinding, 9> scaled_bindings{};
++        for (u32 n = 0; n < scaled_bindings.size(); ++n) scaled_bindings[n] = {
++            .binding = n,
++            .descriptorType = n < 5 ? vk::DescriptorType::eCombinedImageSampler
++                                    : vk::DescriptorType::eStorageImage,
++            .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eCompute};
++        scaled_descriptor_layout = Check(device.createDescriptorSetLayoutUnique({
++            .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
++            .bindingCount = u32(scaled_bindings.size()), .pBindings = scaled_bindings.data()}));
++        const vk::PushConstantRange scaled_push{vk::ShaderStageFlagBits::eCompute, 0, 32};
++        scaled_pipeline_layout = Check(device.createPipelineLayoutUnique({
++            .setLayoutCount = 1, .pSetLayouts = &*scaled_descriptor_layout,
++            .pushConstantRangeCount = 1, .pPushConstantRanges = &scaled_push}));
++        const auto scaled_module = CompileSPV(DLSS_NR_SCALED_COMP, device);
++        scaled_pipeline = Check(device.createComputePipelineUnique({}, {
++            .stage = {.stage = vk::ShaderStageFlagBits::eCompute, .module = scaled_module, .pName = "main"},
++            .layout = *scaled_pipeline_layout}));
++        device.destroyShaderModule(scaled_module);
 +        const auto families = instance.GetPhysicalDevice().getQueueFamilyProperties();
 +        const u32 bits = families[instance.GetGraphicsQueueFamilyIndex()].timestampValidBits;
 +        timestamp_period = instance.GetPhysicalDevice().getProperties().limits.timestampPeriod;
 +        if (bits && timestamp_period > 0 && !timing_pool) {
 +            timestamp_mask = bits == 64 ? ~u64(0) : (u64(1) << bits) - 1;
 +            auto result = device.createQueryPoolUnique({.queryType = vk::QueryType::eTimestamp,
-+                                                              .queryCount = 8});
++                                                              .queryCount = u32(timing_ticks.size()) * timing_stride});
 +            if (result.result == vk::Result::eSuccess) timing_pool = std::move(result.value);
 +        }
 +    }
@@ -63267,18 +63300,34 @@ index 0000000..2b67769
 +        const u32 slot = timing_frame++ % timing_ticks.size();
 +        if (timing_ticks[slot]) {
 +            if (!scheduler.IsFree(timing_ticks[slot])) return -1;
-+            std::array<u64, 2> values{};
-+            if (instance.GetDevice().getQueryPoolResults(*timing_pool, slot * 2, 2,
++            std::array<u64, 5> values{};
++            if (instance.GetDevice().getQueryPoolResults(*timing_pool, slot * timing_stride, timing_stride,
 +                    sizeof(values), values.data(), sizeof(u64), vk::QueryResultFlagBits::e64)
 +                == vk::Result::eSuccess) {
-+                const double ticks = double((values[1] - values[0]) & timestamp_mask);
++                const double ticks = double((values[timing_stride - 1] - values[0]) & timestamp_mask);
 +                BbSettings::Get().dlss_nr_gpu_ms = float(ticks * timestamp_period / 1.0e6);
++                if (timing_stride == 5) {
++                    std::array<float, 4> ms{};
++                    for (u32 i = 0; i < ms.size(); ++i)
++                        ms[i] = float(double((values[i + 1] - values[i]) & timestamp_mask) * timestamp_period / 1.0e6);
++                    auto& s = BbSettings::Get();
++                    s.dlss_nr_encode_ms = ms[0]; s.dlss_nr_evaluate_ms = ms[1];
++                    s.dlss_nr_resolve_ms = ms[2]; s.dlss_nr_copy_ms = ms[3];
++                    if (timing_samples++ % 120 == 0)
++                        std::printf("DLSS NR GPU: scene %ux%u model %ux%u; encode/guides %.3f ms, evaluate %.3f ms, resolve %.3f ms, copy %.3f ms\n",
++                            key.scene_width, key.scene_height, key.width, key.height, ms[0], ms[1], ms[2], ms[3]);
++                }
 +            }
 +        }
-+        cmd.resetQueryPool(*timing_pool, slot * 2, 2);
-+        cmd.writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, *timing_pool, slot * 2);
++        cmd.resetQueryPool(*timing_pool, slot * timing_stride, timing_stride);
++        cmd.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, *timing_pool, slot * timing_stride);
 +        timing_ticks[slot] = scheduler.CurrentTick();
 +        return int(slot);
++    }
++    void MarkTiming(vk::CommandBuffer cmd, int slot, u32 boundary) {
++        if (slot >= 0 && timing_stride == 5)
++            cmd.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, *timing_pool,
++                               u32(slot) * timing_stride + boundary);
 +    }
 +    void ReleaseFeature() {
 +        if (!features[0]) return;
@@ -63286,13 +63335,14 @@ index 0000000..2b67769
 +        std::scoped_lock lock{nr_mutex};
 +        for (auto& feature : features) if (feature) { release(feature); feature = nullptr; }
 +    }
-+    void MakeResources(u32 width, u32 height, int passes) {
++    void MakeResources(u32 width, u32 height, int passes, u32 scene_width, u32 scene_height) {
 +        const auto device = instance.GetDevice(); const auto allocator = instance.GetAllocator();
-+        const auto make = [&](VideoCore::UniqueImage& image, vk::UniqueImageView& view) {
++        const auto make = [&](VideoCore::UniqueImage& image, vk::UniqueImageView& view,
++                              u32 w, u32 h, vk::Format format = vk::Format::eR16G16B16A16Sfloat) {
 +            view.reset(); image = VideoCore::UniqueImage(device, allocator);
 +            image.Create({.imageType = vk::ImageType::e2D,
-+                          .format = vk::Format::eR16G16B16A16Sfloat,
-+                          .extent = {width, height, 1}, .mipLevels = 1, .arrayLayers = 1,
++                          .format = format,
++                          .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1,
 +                          .samples = vk::SampleCountFlagBits::e1, .tiling = vk::ImageTiling::eOptimal,
 +                          .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled |
 +                                   vk::ImageUsageFlagBits::eTransferSrc |
@@ -63300,21 +63350,35 @@ index 0000000..2b67769
 +                          .initialLayout = vk::ImageLayout::eUndefined});
 +            view = Check(device.createImageViewUnique({
 +                .image = vk::Image(image), .viewType = vk::ImageViewType::e2D,
-+                .format = vk::Format::eR16G16B16A16Sfloat,
++                .format = format,
 +                .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}}));
 +        };
-+        make(proxy, proxy_view); make(original, original_view); make(model, model_view); make(resolved, resolved_view);
++        make(proxy, proxy_view, width, height);
++        make(model, model_view, width, height);
++        make(resolved, resolved_view, scene_width, scene_height);
++        if (width != scene_width || height != scene_height) {
++            // The scaled resolve reads the untouched scene directly; no original copy.
++            original_view.reset(); original = VideoCore::UniqueImage{};
++            make(reduced_depth, reduced_depth_view, width, height, vk::Format::eR32Sfloat);
++            make(reduced_motion, reduced_motion_view, width, height, vk::Format::eR16G16Sfloat);
++        } else {
++            make(original, original_view, width, height);
++            reduced_depth_view.reset(); reduced_depth = VideoCore::UniqueImage{};
++            reduced_motion_view.reset(); reduced_motion = VideoCore::UniqueImage{};
++        }
 +        for (int n = 0; n < 2; ++n) {
-+            if (n + 1 < passes) make(extra_models[n], extra_model_views[n]);
++            if (n + 1 < passes) make(extra_models[n], extra_model_views[n], width, height);
 +            else { extra_model_views[n].reset(); extra_models[n] = VideoCore::UniqueImage{}; }
 +        }
 +    }
 +    Key Wanted(u32 width, u32 height) const {
 +        const auto& s = BbSettings::Get();
-+        Key wanted{width, height, s.dlss_nr_preset, s.dlss_nr_style, s.dlss_nr_intensity,
++        const auto [model_width, model_height] = BbSettings::DlssNrModelSize(int(width), int(height));
++        Key wanted{u32(model_width), u32(model_height), s.dlss_nr_preset, s.dlss_nr_style, s.dlss_nr_intensity,
 +                s.dlss_nr_local_structure, s.dlss_nr_local_tone, s.dlss_nr_skin_structure,
 +                diagnostic_mask < 0 ? bool(s.dlss_nr_auto_mask) : diagnostic_mask != 0,
 +                std::clamp(s.dlss_nr_passes.load(), 1, 3)};
++        wanted.scene_width = width; wanted.scene_height = height;
 +        for (int pass = 1; pass < wanted.passes; ++pass)
 +            wanted.extra[pass - 1] = BbSettings::DlssNrPassTuning(s, pass);
 +        return wanted;
@@ -63330,11 +63394,12 @@ index 0000000..2b67769
 +        // buffer, and Finish replaces it. If the old feature was used in this tick,
 +        // bypass until a submission boundary; otherwise drain the submitted work.
 +        if (features[0] && feature_tick >= scheduler.CurrentTick()) return false;
-+        ReleaseFeature(); scheduler.WaitSubmittedWork(); MakeResources(f.width, f.height, wanted.passes);
++        ReleaseFeature(); scheduler.WaitSubmittedWork();
++        MakeResources(wanted.width, wanted.height, wanted.passes, f.width, f.height);
 +        { std::scoped_lock lock{nr_mutex};
 +          for (int pass = 0; pass < wanted.passes; ++pass) {
 +              const auto tuning = Tuning(wanted, pass);
-+              features[pass] = create((void*)VkCommandBuffer(f.cmdbuf), params, f.width, f.height,
++              features[pass] = create((void*)VkCommandBuffer(f.cmdbuf), params, wanted.width, wanted.height,
 +                                     wanted.preset, tuning.intensity, tuning.style, tuning.structure,
 +                                     tuning.tone, tuning.skin, wanted.auto_mask, 0);
 +              feature_tick = scheduler.CurrentTick();
@@ -63345,13 +63410,16 @@ index 0000000..2b67769
 +                          pass + 1, features[pass], tuning.style, tuning.intensity, tuning.structure, tuning.tone, tuning.skin);
 +          }
 +        }
-+        key = wanted; skip_first = true; history_reset = true;
++        key = wanted; skip_first = true; history_reset = true; sr_reset_pending = true;
 +        diagnostic_captured = false; diagnostic_frames = 0;
 +        feature_tick = scheduler.CurrentTick();
 +        BbSettings::Get().dlss_nr_effective_width = f.width;
 +        BbSettings::Get().dlss_nr_effective_height = f.height;
-+        std::printf("DLSS NR: %d feature 18 pass(es) created at %ux%u (preset %d, style %d); evaluation begins next frame\n",
-+                    key.passes, f.width, f.height, key.preset, key.style);
++        BbSettings::Get().dlss_nr_model_width = key.width;
++        BbSettings::Get().dlss_nr_model_height = key.height;
++        std::printf("DLSS NR: %d feature 18 pass(es); scene/SR %ux%u, model %ux%u (%s, preset %d, style %d); evaluation begins next frame\n",
++                    key.passes, f.width, f.height, key.width, key.height,
++                    Scaled() ? "optimized" : "standard", key.preset, key.style);
 +        return true;
 +    }
 +    void Dispatch(vk::CommandBuffer cmd, u32 mode, vk::ImageView source, vk::ImageView model_in,
@@ -63376,17 +63444,43 @@ index 0000000..2b67769
 +        cmd.pushConstants(*pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(push), &push);
 +        cmd.dispatch((width + 7) / 8, (height + 7) / 8, 1);
 +    }
++    void DispatchScaled(const Frame& f, bool resolve) {
++        const std::array views{f.color.view, f.depth.view,
++            resolve ? *reduced_depth_view : f.motion.view, *proxy_view,
++            ModelView(key.passes - 1), *proxy_view, *reduced_depth_view,
++            *reduced_motion_view, *resolved_view};
++        std::array<vk::DescriptorImageInfo, 9> infos{};
++        std::array<vk::WriteDescriptorSet, 9> writes{};
++        for (u32 n = 0; n < writes.size(); ++n) {
++            infos[n] = {n < 5 ? *sampler : vk::Sampler{}, views[n], vk::ImageLayout::eGeneral};
++            writes[n] = {.dstBinding = n, .descriptorCount = 1,
++                .descriptorType = n < 5 ? vk::DescriptorType::eCombinedImageSampler
++                                        : vk::DescriptorType::eStorageImage,
++                .pImageInfo = &infos[n]};
++        }
++        struct Push { u32 mode, width, height, hdr; float white, strength; u32 scene_width, scene_height; };
++        const Push push{resolve ? 1u : 0u, key.width, key.height, f.hdr,
++            BbSettings::Get().dlss_nr_white_point, 1.0f, f.width, f.height};
++        f.cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *scaled_pipeline);
++        f.cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *scaled_pipeline_layout, 0, writes);
++        f.cmdbuf.pushConstants(*scaled_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(push), &push);
++        const u32 w = resolve ? f.width : key.width, h = resolve ? f.height : key.height;
++        f.cmdbuf.dispatch((w + 7) / 8, (h + 7) / 8, 1);
++    }
 +    // Explicit developer opt-in: capture every model output from the SAME frame, after GPU
 +    // completion, without finishing/replacing the caller's active command buffer.
 +    void CaptureDiagnostic(const Frame& f) {
 +        const char* directory = std::getenv("BB_DLSS_NR_CAPTURE");
 +        if (!directory || !*directory || diagnostic_captured || ++diagnostic_frames < 120) return;
 +        diagnostic_captured = true;
++        if (Scaled() && f.color.format != vk::Format::eR16G16B16A16Sfloat) {
++            std::printf("DLSS NR: scaled diagnostic capture needs an RGBA16F scene; skipped (rendering unaffected)\n");
++            return;
++        }
 +        std::printf("DLSS NR capture: case %d, engine reset=%d, mask=%d, mv=%g\n",
 +                    diagnostic_case, int(f.reset), int(key.auto_mask), diagnostic_motion_scale);
 +        const auto allocator = instance.GetAllocator();
-+        const VkDeviceSize plane_bytes = VkDeviceSize(f.width) * f.height * 8;
-+        std::vector<vk::Image> sources{vk::Image(original), vk::Image(proxy)};
++        std::vector<vk::Image> sources{Scaled() ? f.color.image : vk::Image(original), vk::Image(proxy)};
 +        std::vector<std::string> names{"original", "proxy"};
 +        for (int pass = 0; pass < key.passes; ++pass) {
 +            sources.push_back(ModelImage(pass));
@@ -63394,8 +63488,13 @@ index 0000000..2b67769
 +        }
 +        sources.push_back(vk::Image(resolved)); names.push_back("resolve");
 +        const u32 plane_count = u32(sources.size());
++        std::vector<vk::Extent3D> extents(plane_count, vk::Extent3D{key.width, key.height, 1});
++        extents.front() = extents.back() = vk::Extent3D{f.width, f.height, 1};
++        std::vector<VkDeviceSize> offsets(plane_count + 1, 0);
++        for (u32 i = 0; i < plane_count; ++i)
++            offsets[i + 1] = offsets[i] + VkDeviceSize(extents[i].width) * extents[i].height * 8;
 +        const VkBufferCreateInfo ci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-+            .size = plane_bytes * plane_count, .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
++            .size = offsets.back(), .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 +            .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
 +        const VmaAllocationCreateInfo ai{.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
 +            VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT, .usage = VMA_MEMORY_USAGE_AUTO};
@@ -63414,9 +63513,9 @@ index 0000000..2b67769
 +            .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
 +        f.cmdbuf.pipelineBarrier2({.imageMemoryBarrierCount = plane_count, .pImageMemoryBarriers = barriers.data()});
 +        for (u32 i = 0; i < plane_count; ++i) {
-+            const vk::BufferImageCopy copy{.bufferOffset = plane_bytes * i,
++            const vk::BufferImageCopy copy{.bufferOffset = offsets[i],
 +                .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-+                .imageExtent = {f.width, f.height, 1}};
++                .imageExtent = extents[i]};
 +            f.cmdbuf.copyImageToBuffer(sources[i], vk::ImageLayout::eTransferSrcOptimal,
 +                                      vk::Buffer(buffer), copy);
 +            std::swap(barriers[i].oldLayout, barriers[i].newLayout);
@@ -63435,18 +63534,20 @@ index 0000000..2b67769
 +            (std::to_string(f.width) + "x" + std::to_string(f.height) + "-" +
 +             std::to_string(key.passes) + "pass-" + std::to_string(++diagnostic_capture_serial));
 +        scheduler.DeferOperation([allocator, buffer, allocation, data = info.pMappedData,
-+                                  path, plane_bytes, names = std::move(names), capture_key = key,
++                                  path, offsets, extents, names = std::move(names), capture_key = key,
 +                                  hdr = f.hdr, white = BbSettings::Get().dlss_nr_white_point.load(),
 +                                  reset = f.reset, width = f.width, height = f.height] {
 +            vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
 +            std::error_code ec; std::filesystem::create_directories(path, ec);
 +            for (u32 i = 0; i < names.size(); ++i) {
 +                std::ofstream file(path / (names[i] + ".rgba16f"), std::ios::binary);
-+                file.write(static_cast<const char*>(data) + plane_bytes * i, std::streamsize(plane_bytes));
++                file.write(static_cast<const char*>(data) + offsets[i], std::streamsize(offsets[i + 1] - offsets[i]));
 +            }
 +            std::ofstream(path / "size.txt") << width << ' ' << height << '\n';
 +            std::ofstream metadata(path / "settings.txt");
 +            metadata << "passes=" << capture_key.passes
++                << "\nscene_width=" << width << "\nscene_height=" << height
++                << "\nmodel_width=" << capture_key.width << "\nmodel_height=" << capture_key.height
 +                << "\nhdr=" << hdr << "\nwhite_point=" << white << "\nintensity=" << capture_key.intensity
 +                << "\npreset=" << capture_key.preset << "\nstyle=" << capture_key.style
 +                << "\nauto_mask=" << capture_key.auto_mask << "\nreset=" << reset << '\n';
@@ -63458,6 +63559,8 @@ index 0000000..2b67769
 +                    << "\npass" << pass + 1 << "_skin_structure=" << tuning.skin << '\n';
 +                metadata << "pass" << pass + 1 << "_style=" << tuning.style << '\n';
 +            }
++            for (u32 i = 0; i < names.size(); ++i)
++                metadata << names[i] << "_size=" << extents[i].width << ' ' << extents[i].height << '\n';
 +            std::printf("DLSS NR: %d-pass same-frame diagnostic buffers saved (%ux%u): %s\n",
 +                        capture_key.passes, width, height, path.string().c_str());
 +            vmaDestroyBuffer(allocator, buffer, allocation);
@@ -63478,9 +63581,12 @@ index 0000000..2b67769
 +        const int timing_slot = BeginTiming(f.cmdbuf);
 +        const auto all = vk::PipelineStageFlagBits2::eAllCommands;
 +        const auto rw = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite;
-+        std::vector<vk::ImageMemoryBarrier2> begin(3 + key.passes);
-+        std::vector<vk::Image> images{vk::Image(proxy), vk::Image(original), vk::Image(resolved)};
++        std::vector<vk::Image> images{vk::Image(proxy), vk::Image(resolved)};
++        if (Scaled()) {
++            images.push_back(vk::Image(reduced_depth)); images.push_back(vk::Image(reduced_motion));
++        } else images.push_back(vk::Image(original));
 +        for (int pass = 0; pass < key.passes; ++pass) images.push_back(ModelImage(pass));
++        std::vector<vk::ImageMemoryBarrier2> begin(images.size());
 +        for (u32 n = 0; n < begin.size(); ++n) begin[n] = {
 +            .srcStageMask = all, .srcAccessMask = {},
 +            .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader, .dstAccessMask = rw,
@@ -63489,20 +63595,28 @@ index 0000000..2b67769
 +            .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
 +        f.cmdbuf.pipelineBarrier2({.imageMemoryBarrierCount = u32(begin.size()),
 +                                   .pImageMemoryBarriers = begin.data()});
-+        Dispatch(f.cmdbuf, 0, f.color.view, *proxy_view, *original_view, *proxy_view, *original_view,
-+                 f.width, f.height, f.hdr);
++        if (Scaled()) DispatchScaled(f, false);
++        else Dispatch(f.cmdbuf, 0, f.color.view, *proxy_view, *original_view, *proxy_view, *original_view,
++                      f.width, f.height, f.hdr);
 +        const vk::MemoryBarrier2 encoded{
 +            .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 +            .srcAccessMask = vk::AccessFlagBits2::eShaderWrite,
 +            .dstStageMask = all, .dstAccessMask = vk::AccessFlagBits2::eShaderRead};
 +        f.cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &encoded});
-+        Fsr4Upscaler::Image proxy_r{vk::Image(proxy), *proxy_view, f.width, f.height, vk::Format::eR16G16B16A16Sfloat};
-+        auto depth = Resource(f.depth, vk::ImageAspectFlagBits::eDepth, false);
-+        auto motion = Resource(f.motion, vk::ImageAspectFlagBits::eColor, false);
++        MarkTiming(f.cmdbuf, timing_slot, 1);
++        Fsr4Upscaler::Image proxy_r{vk::Image(proxy), *proxy_view, key.width, key.height, vk::Format::eR16G16B16A16Sfloat};
++        const Fsr4Upscaler::Image depth_r = Scaled()
++            ? Fsr4Upscaler::Image{vk::Image(reduced_depth), *reduced_depth_view, key.width, key.height, vk::Format::eR32Sfloat}
++            : f.depth;
++        const Fsr4Upscaler::Image motion_r = Scaled()
++            ? Fsr4Upscaler::Image{vk::Image(reduced_motion), *reduced_motion_view, key.width, key.height, vk::Format::eR16G16Sfloat}
++            : f.motion;
++        auto depth = Resource(depth_r, Scaled() ? vk::ImageAspectFlagBits::eColor : vk::ImageAspectFlagBits::eDepth, false);
++        auto motion = Resource(motion_r, vk::ImageAspectFlagBits::eColor, false);
 +        Fsr4Upscaler::Image pass_input = proxy_r;
 +        for (int pass = 0; pass < key.passes; ++pass) {
 +        const auto tuning = Tuning(key, pass);
-+        Fsr4Upscaler::Image model_r{ModelImage(pass), ModelView(pass), f.width, f.height,
++        Fsr4Upscaler::Image model_r{ModelImage(pass), ModelView(pass), key.width, key.height,
 +                                  vk::Format::eR16G16B16A16Sfloat};
 +        auto color = Resource(pass_input, vk::ImageAspectFlagBits::eColor, false);
 +        auto output = Resource(model_r, vk::ImageAspectFlagBits::eColor, true);
@@ -63511,7 +63625,7 @@ index 0000000..2b67769
 +            // Developer controls may override this for convention experiments.
 +            const float mv_scale = diagnostic_motion_scale;
 +            return evaluate((void*)VkCommandBuffer(f.cmdbuf), features[pass], params, &color, &depth,
-+                            &motion, &output, f.width, f.height, f.depth.width, f.depth.height,
++                            &motion, &output, key.width, key.height, depth_r.width, depth_r.height,
 +                            0, diagnostic_reset < 0 ? f.reset || history_reset : diagnostic_reset,
 +                            tuning.intensity, tuning.style, tuning.structure,
 +                            tuning.tone, tuning.skin, key.auto_mask, mv_scale, mv_scale); }();
@@ -63524,11 +63638,15 @@ index 0000000..2b67769
 +        f.cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &evaluated});
 +        pass_input = model_r;
 +        }
++        MarkTiming(f.cmdbuf, timing_slot, 2);
++        if (history_reset) sr_reset_pending = true;
 +        history_reset = false;
 +        const u32 resolve_mode = std::getenv("BB_DLSS_NR_DEBUG") ? 2u : 1u;
-+        Dispatch(f.cmdbuf, resolve_mode, *proxy_view, ModelView(key.passes - 1), *original_view, *resolved_view, *proxy_view,
-+                 f.width, f.height, f.hdr);
++        if (Scaled()) DispatchScaled(f, true);
++        else Dispatch(f.cmdbuf, resolve_mode, *proxy_view, ModelView(key.passes - 1), *original_view, *resolved_view, *proxy_view,
++                      f.width, f.height, f.hdr);
 +        CaptureDiagnostic(f);
++        MarkTiming(f.cmdbuf, timing_slot, 3);
 +        std::array<vk::ImageMemoryBarrier2, 2> blit{{
 +            {.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 +             .srcAccessMask = vk::AccessFlagBits2::eShaderWrite,
@@ -63561,7 +63679,7 @@ index 0000000..2b67769
 +        blit[0].dstAccessMask = blit[1].dstAccessMask = vk::AccessFlagBits2::eShaderRead;
 +        f.cmdbuf.pipelineBarrier2({.imageMemoryBarrierCount = 2, .pImageMemoryBarriers = blit.data()});
 +        if (timing_slot >= 0) f.cmdbuf.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe,
-+                                                    *timing_pool, u32(timing_slot) * 2 + 1);
++                                                    *timing_pool, u32(timing_slot) * timing_stride + timing_stride - 1);
 +        const auto frame = BbSettings::Get().dlss_nr_frames.fetch_add(1);
 +        if (frame == 0)
 +            std::printf("DLSS NR: first frame evaluated at %ux%u (%s), resolve mode %u, motion scale %g\n",
@@ -63585,6 +63703,7 @@ index 0000000..2b67769
 +bool DlssNrVulkan::Available() const noexcept { return impl->available; }
 +const char* DlssNrVulkan::Problem() const noexcept { return impl->problem.empty() ? nullptr : impl->problem.c_str(); }
 +bool DlssNrVulkan::Record(const Frame& frame) { return impl->Record(frame); }
++bool DlssNrVulkan::ConsumeHistoryReset() noexcept { return std::exchange(impl->sr_reset_pending, false); }
 +void DlssNrVulkan::ResetHistory() noexcept {
 +    impl->history_reset = true;
 +    if (!impl->available) impl->attempted = false;
@@ -76578,7 +76697,7 @@ index d310098..73171a6 100644
  
  } // namespace Vulkan
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
-index a3240be..54ea495 100644
+index a3240be..48cc653 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
 @@ -10,14 +10,18 @@
@@ -77022,7 +77141,7 @@ index a3240be..54ea495 100644
      const auto cmdbuf = scheduler.CommandBuffer();
      const Breadcrumbs::Scope crumb{cmdbuf, scheduler.CrumbStream(), "TAA"};
  
-@@ -1184,9 +1404,19 @@ void TemporalUpscaler::Run() {
+@@ -1184,9 +1404,20 @@ void TemporalUpscaler::Run() {
      own_barrier(vk::Image(motion_image), vk::ImageLayout::eGeneral,
                  vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite,
                  vk::ImageLayout::eGeneral, all, vk::AccessFlagBits2::eShaderRead);
@@ -77037,12 +77156,13 @@ index a3240be..54ea495 100644
 +                         {input_depth, input_depth_view, w, h, depth_format},
 +                         {vk::Image(motion_image), *motion_view, w, h, vk::Format::eR16G16Sfloat},
 +                         w, h, reset, true});
++        if (dlss_nr->ConsumeHistoryReset()) reset = true;
 +    }
 +
      const auto now = std::chrono::steady_clock::now();
      float frame_ms = std::chrono::duration<float, std::milli>(now - last_frame).count();
      if (frame_ms <= 0.0f || frame_ms > 200.0f) {
-@@ -1195,13 +1425,14 @@ void TemporalUpscaler::Run() {
+@@ -1195,13 +1426,14 @@ void TemporalUpscaler::Run() {
      last_frame = now;
  
      bool dispatched = false;
@@ -77058,7 +77178,7 @@ index a3240be..54ea495 100644
          if (dispatched && has_reactive && BbSettings::IsFsr4(BbSettings::Get().upscaler)) {
              RecordFsr4Reactive(cmdbuf, input_color_view, w, h, ow, oh);
          }
-@@ -1274,6 +1505,7 @@ void TemporalUpscaler::Run() {
+@@ -1274,6 +1506,7 @@ void TemporalUpscaler::Run() {
              dispatched = true;
          }
      }
@@ -77066,7 +77186,7 @@ index a3240be..54ea495 100644
      if (dispatched) {
          reset = false;
          dispatched_last_frame = true;
-@@ -1413,7 +1645,16 @@ float TemporalUpscaler::SceneMipBias() const {
+@@ -1413,7 +1646,16 @@ float TemporalUpscaler::SceneMipBias() const {
      if (!Active() || BbSettings::Get().upscaler == BbSettings::UpscalerTaa) return 0.0f;
      const float render = float(BbSettings::Get().active_render_width.load());
      const float output = float(Scaled() ? target_width : 1920u);
@@ -77084,7 +77204,7 @@ index a3240be..54ea495 100644
  }
  
  bool TemporalUpscaler::Scaled() const {
-@@ -1434,8 +1675,31 @@ void TemporalUpscaler::OnColorTarget(VideoCore::ImageId color) {
+@@ -1434,8 +1676,31 @@ void TemporalUpscaler::OnColorTarget(VideoCore::ImageId color) {
  }
  
  void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
@@ -77117,7 +77237,7 @@ index a3240be..54ea495 100644
      if (!Scaled()) {
          return;
      }
-@@ -1454,8 +1718,17 @@ void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
+@@ -1454,8 +1719,17 @@ void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
          return;
      }
      const auto& image = texture_cache.GetImage(color);
@@ -77136,7 +77256,7 @@ index a3240be..54ea495 100644
      const bool ui_draw = movie &&
          (image.info.pixel_format == vk::Format::eR8G8B8A8Unorm ||
           image.info.pixel_format == vk::Format::eR8G8B8A8Srgb) &&
-@@ -1469,14 +1742,110 @@ void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
+@@ -1469,14 +1743,110 @@ void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
      case UiComposition::Background::Temporal:
          RunScaled();
          if (ui_phase) {
@@ -77248,7 +77368,7 @@ index a3240be..54ea495 100644
  }
  
  void TemporalUpscaler::EnsureUiResources(u32 w, u32 h, vk::Format color, vk::Format depth) {
-@@ -1632,15 +2001,29 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
+@@ -1632,15 +2002,29 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
                          vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead);
          runtime.FlushBarriers();
      }
@@ -77283,7 +77403,7 @@ index a3240be..54ea495 100644
                        region](vk::CommandBuffer cmd) {
          vk::ImageMemoryBarrier2 barrier{
              .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-@@ -1653,6 +2036,18 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
+@@ -1653,6 +2037,18 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
              .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
          };
          cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier});
@@ -77302,7 +77422,7 @@ index a3240be..54ea495 100644
          cmd.blitImage(source, source_layout, ui, vk::ImageLayout::eTransferDstOptimal, region,
                        vk::Filter::eLinear);
          barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-@@ -1746,6 +2141,9 @@ void TemporalUpscaler::RunScaled() {
+@@ -1746,6 +2142,9 @@ void TemporalUpscaler::RunScaled() {
      const auto color_access = vk::AccessFlagBits2::eColorAttachmentRead |
                                vk::AccessFlagBits2::eColorAttachmentWrite;
      const auto rw = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite;
@@ -77312,7 +77432,7 @@ index a3240be..54ea495 100644
      // The previous frame's display pass read it: all commands before.
      barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eUndefined,
              all, vk::AccessFlagBits2::eNone, vk::ImageLayout::eGeneral, all, rw);
-@@ -1756,6 +2154,7 @@ void TemporalUpscaler::RunScaled() {
+@@ -1756,6 +2155,7 @@ void TemporalUpscaler::RunScaled() {
      barrier(vk::Image(motion_image), vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eGeneral,
              vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite,
              vk::ImageLayout::eGeneral, all, vk::AccessFlagBits2::eShaderRead);
@@ -77320,7 +77440,7 @@ index a3240be..54ea495 100644
  
      const auto now = std::chrono::steady_clock::now();
      float frame_ms = std::chrono::duration<float, std::milli>(now - last_frame).count();
-@@ -1775,11 +2174,20 @@ void TemporalUpscaler::RunScaled() {
+@@ -1775,11 +2175,21 @@ void TemporalUpscaler::RunScaled() {
              RecordTaa(cmdbuf, color_view, depth_view);
          } else {
              if (BbSettings::Get().upscaler == BbSettings::UpscalerDlss) {
@@ -77332,6 +77452,7 @@ index a3240be..54ea495 100644
 +                                 {vk::Image(motion_image), *motion_view, w, h,
 +                                  vk::Format::eR16G16Sfloat},
 +                                 w, h, reset, false});
++                if (dlss_nr->ConsumeHistoryReset()) reset = true;
 +            }
              ok4 = RecordFsr4(cmdbuf,
                               {color_image, color_view, source_width, source_height,
@@ -77342,7 +77463,7 @@ index a3240be..54ea495 100644
              } else {
              // bbport: FSR 4 treats its colour as linear light; this frame is the game's
              // tonemapped, sRGB-encoded one. Decoded first, the output encoded again below.
-@@ -1883,6 +2291,7 @@ void TemporalUpscaler::RunScaled() {
+@@ -1883,6 +2293,7 @@ void TemporalUpscaler::RunScaled() {
              if (BbSettings::Get().upscaler != BbSettings::UpscalerTaa) {
                  ExtraSharpen(vk::Image(output_image), false, ow, oh);
              }
@@ -77350,7 +77471,7 @@ index a3240be..54ea495 100644
              barrier(vk::Image(output_image), vk::ImageAspectFlagBits::eColor,
                      vk::ImageLayout::eGeneral, all, rw, vk::ImageLayout::eGeneral,
                      vk::PipelineStageFlagBits2::eBlit, vk::AccessFlagBits2::eTransferRead);
-@@ -2008,6 +2417,7 @@ void TemporalUpscaler::RunScaled() {
+@@ -2008,6 +2419,7 @@ void TemporalUpscaler::RunScaled() {
          reset = false;
          dispatched_last_frame = true;
          ExtraSharpen(vk::Image(ui_image), true, ow, oh);
@@ -77358,7 +77479,7 @@ index a3240be..54ea495 100644
      }
      barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eGeneral, all,
              rw, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-@@ -2210,14 +2620,14 @@ bool TemporalUpscaler::UseFsr4() const {
+@@ -2210,14 +2622,14 @@ bool TemporalUpscaler::UseFsr4() const {
          return dlss && dlss->Available() && !fsr4_failed;
      }
      const bool supported = selected == BbSettings::UpscalerFsr411
@@ -77376,7 +77497,7 @@ index a3240be..54ea495 100644
      const auto& settings = BbSettings::Get();
      // Same jitter convention as FSR 3; the menu (or toggle 1 << 26) flips it for tests.
      const float sign =
-@@ -2232,7 +2642,7 @@ bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image
+@@ -2232,7 +2644,7 @@ bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image
                     vk::Format::eR16G16B16A16Sfloat},
          .render_width = w,
          .render_height = h,
@@ -77385,7 +77506,7 @@ index a3240be..54ea495 100644
          .jitter = {sign * jitter[0], sign * jitter[1]},
          .frame_ms = frame_ms,
          .near_plane = camera_motion.Near(),
-@@ -2242,6 +2652,10 @@ bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image
+@@ -2242,6 +2654,10 @@ bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image
          .sharpen = settings.sharpen,
          .reset = reset,
          .auto_exposure = settings.fsr4_auto_exposure,
@@ -77396,7 +77517,7 @@ index a3240be..54ea495 100644
      };
      const bool ok = use_dlss ? dlss->Record(frame) : fsr4->Record(frame);
      // The menu shows the reason; it outlives this frame (FSR 4 keeps its last message).
-@@ -2257,7 +2671,20 @@ bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image
+@@ -2257,7 +2673,20 @@ bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image
          BbSettings::Get().fsr4_problem = kept[next].c_str();
          next = (next + 1) % kept.size();
      }
@@ -83005,7 +83126,7 @@ index 0000000..279ba77
 +void MaybeReport();
 +} // namespace BbNativeCalls
 diff --git a/gpu/shim/bbport_overlay.cpp b/gpu/shim/bbport_overlay.cpp
-index 83e5538..d5f7193 100644
+index 83e5538..9da4e95 100644
 --- a/gpu/shim/bbport_overlay.cpp
 +++ b/gpu/shim/bbport_overlay.cpp
 @@ -4,6 +4,7 @@
@@ -83712,7 +83833,7 @@ index 83e5538..d5f7193 100644
              Hint(BbSettings::MenuText(
                  "FSR 4 in INT8 mode (v07 model from AMD FidelityFX SDK sources). Higher quality "
                  "than FSR 3.1, but the pass is more demanding. Changing the preset rebuilds the "
-@@ -275,240 +753,1060 @@ void Menu() {
+@@ -275,240 +753,1072 @@ void Menu() {
                  "чем у FSR 3.1, но проход тяжелее. Смена пресета пересобирает модель (короткая "
                  "пауза). Ассеты: tools/fetch_fsr4_assets.sh."));
          }
@@ -84007,8 +84128,7 @@ index 83e5538..d5f7193 100644
 +    }
 +    ImGui::EndDisabled(); // upscaler off
 +}
- 
--    ImGui::SeparatorText("Reactive mask");
++
 +// bbport: DLSS's own options (vk_dlss.cpp), live; shown with DLSS selected (and to a search).
 +void DlssSection() {
 +    auto& s = BbSettings::Get();
@@ -84102,16 +84222,26 @@ index 83e5538..d5f7193 100644
 +        char shown[48];
 +        if (current == 0) std::snprintf(shown, sizeof(shown), "Native");
 +        else std::snprintf(shown, sizeof(shown), "%dp", current);
++        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
 +        if (ImGui::BeginCombo(label, shown)) {
-+            if (ImGui::Selectable("Native", current == 0)) Store(s.dlss_nr_height, 0, true);
++            if (ImGui::Selectable("Native", current == 0)) {
++                Store(s.dlss_nr_height, 0, true);
++            }
 +            for (int h : heights) if (h <= output_h) {
 +                char name[24]; std::snprintf(name, sizeof(name), "%dp", h);
-+                if (ImGui::Selectable(name, current == h)) Store(s.dlss_nr_height, h, true);
++                if (ImGui::Selectable(name, current == h)) {
++                    Store(s.dlss_nr_height, h, true);
++                }
 +            }
 +            ImGui::EndCombo();
 +        }
 +        Hint("Overrides Quality/Balanced/Performance input size. DLAA remains native; the saved "
 +             "height returns when switching back to DLSS SR.");
++        ImGui::SameLine();
++        bool performance = s.dlss_nr_model_scale < 1.0f;
++        if (ImGui::Checkbox("Performance##NRInput", &performance))
++            Store(s.dlss_nr_model_scale, performance ? 0.75f : 1.0f, true);
++        Hint("Use optimized neural rendering at the selected input height. Applies immediately.");
 +    }
 +    if (const char* label = Item("NR intensity")) Slider(label, s.dlss_nr_intensity, 0.0f, 2.0f);
 +    if (const char* label = Item("NR preset")) {
@@ -84179,14 +84309,17 @@ index 83e5538..d5f7193 100644
 +    const char* nr_problem = s.dlss_nr_problem.load();
 +    ImGui::TextDisabled("%s: %s", "Status", nr_problem ? nr_problem : "active");
 +    if (s.dlss_nr_effective_width > 0) {
-+        ImGui::TextDisabled("Input: %dx%d  Output: %dx%d  Frames: %llu  GPU: %.2f ms",
++        ImGui::TextDisabled("Scene/SR: %dx%d  NR model: %dx%d  Output: %dx%d",
 +                            int(s.dlss_nr_effective_width), int(s.dlss_nr_effective_height),
-+                            BbSettings::OutputWidth(s.output_res), BbSettings::OutputHeight(s.output_res),
++                            int(s.dlss_nr_model_width), int(s.dlss_nr_model_height),
++                            BbSettings::OutputWidth(s.output_res), BbSettings::OutputHeight(s.output_res));
++        ImGui::TextDisabled("NR frames: %llu  GPU: %.2f ms",
 +                            static_cast<unsigned long long>(s.dlss_nr_frames.load()),
 +                            float(s.dlss_nr_gpu_ms));
 +    }
 +}
-+
+ 
+-    ImGui::SeparatorText("Reactive mask");
 +// The reactive mask (vk_temporal_upscaler.cpp ReactiveOn) and the motion vectors, with their debug
 +// views.
 +void MaskSection() {
@@ -84521,19 +84654,7 @@ index 83e5538..d5f7193 100644
 +    Section("PC Camera");
 +    if (WholeSection() && Shown("PC Camera")) {
 +        ImGui::TextDisabled("%s", BbSettings::MenuText("Enable PC Camera in the launcher before starting; changes here are live."));
-     }
--    Hint(BbSettings::MenuText(
--        "Effects are enabled and disabled by game patches at startup (patches/Bloodborne.xml). "
--        "Motion blur and shadows from dynamic lights place a significant load on the GPU.",
--        "Эффекты включаются и выключаются патчами игры при запуске (patches/Bloodborne.xml). "
--        "Размытие в движении и тени от динамических источников заметно нагружают GPU."));
--    Hint(BbSettings::MenuText(
--        "Free camera: hold Cross and press L3 (keyboard: Space + Z). "
--        "Debug menu: left touchpad / Tab. Requires DbgFont14h.ccm and DbgFont14h.tpf "
--        "in dvdroot_ps4/font from Nexus mod #253. Right touchpad: Backspace.",
--        "Свободная камера: удерживайте Cross и нажимайте L3 (клавиатура: Space + Z). "
--        "Debug menu: левый touchpad / Tab. Нужны DbgFont14h.ccm и DbgFont14h.tpf "
--        "в dvdroot_ps4/font из мода Nexus #253. Правый touchpad: Backspace."));
++    }
 +    if (const char* label = Item("Camera FOV scale")) {
 +        Slider(label, s.camera_fov_scale, 1.0f, 1.5f);
 +    }
@@ -84544,7 +84665,7 @@ index 83e5538..d5f7193 100644
 +        Slider(label, s.camera_height_scale, 0.5f, 1.5f);
 +    }
 +}
- 
++
 +void CheatsSection() {
 +    auto& s = BbSettings::Get();
 +    Section("Cheats", "Читы");
@@ -84879,8 +85000,20 @@ index 83e5538..d5f7193 100644
 +            }
 +        }
 +        ImGui::EndChild();
-+    }
-+
+     }
+-    Hint(BbSettings::MenuText(
+-        "Effects are enabled and disabled by game patches at startup (patches/Bloodborne.xml). "
+-        "Motion blur and shadows from dynamic lights place a significant load on the GPU.",
+-        "Эффекты включаются и выключаются патчами игры при запуске (patches/Bloodborne.xml). "
+-        "Размытие в движении и тени от динамических источников заметно нагружают GPU."));
+-    Hint(BbSettings::MenuText(
+-        "Free camera: hold Cross and press L3 (keyboard: Space + Z). "
+-        "Debug menu: left touchpad / Tab. Requires DbgFont14h.ccm and DbgFont14h.tpf "
+-        "in dvdroot_ps4/font from Nexus mod #253. Right touchpad: Backspace.",
+-        "Свободная камера: удерживайте Cross и нажимайте L3 (клавиатура: Space + Z). "
+-        "Debug menu: левый touchpad / Tab. Нужны DbgFont14h.ccm и DbgFont14h.tpf "
+-        "в dvdroot_ps4/font из мода Nexus #253. Правый touchpad: Backspace."));
+ 
 +    const float footer_top = ImGui::GetCursorPosY();
      bool restart =
          s.object_motion != s.startup_object_motion || s.model_lod != s.startup_model_lod ||
@@ -84924,9 +85057,7 @@ index 83e5538..d5f7193 100644
 +    // Quit (issue #21): the same clean exit as closing the window, so a controller player need not
 +    // force-close the game. Asks once more before quitting; the game's own save is untouched.
 +    static bool quit_armed = false;
-     ImGui::SameLine();
--    ImGui::TextDisabled("%s", BbSettings::MenuText("Settings are saved to bbport.ini",
--                                             "Настройки сохраняются в bbport.ini"));
++    ImGui::SameLine();
 +    // One ID for both labels ("###quit"): a label change made it a new button, and a controller's
 +    // focus stayed on the old one, so the confirmation was dropped before the second press.
 +    const std::string quit_label =
@@ -84943,7 +85074,9 @@ index 83e5538..d5f7193 100644
 +    if (quit_armed && !ImGui::IsItemHovered() && !ImGui::IsItemFocused()) {
 +        quit_armed = false;
 +    }
-+    ImGui::SameLine();
+     ImGui::SameLine();
+-    ImGui::TextDisabled("%s", BbSettings::MenuText("Settings are saved to bbport.ini",
+-                                             "Настройки сохраняются в bbport.ini"));
 +    ImGui::TextDisabled("%s", BbSettings::MenuText("Settings are saved to lantern.ini",
 +                                             "Настройки сохраняются в lantern.ini"));
 +    ImGui::PushTextWrapPos();
@@ -84957,7 +85090,7 @@ index 83e5538..d5f7193 100644
      ImGui::End();
      if (!keep_open) {
          SetOpen(false);
-@@ -516,20 +1814,90 @@ void Menu() {
+@@ -516,20 +1826,90 @@ void Menu() {
  }
  
  void FpsCounter() {
@@ -85055,7 +85188,7 @@ index 83e5538..d5f7193 100644
  }
  
  void TextPrompt() {
-@@ -552,7 +1920,7 @@ void TextPrompt() {
+@@ -552,7 +1932,7 @@ void TextPrompt() {
      ImGui::Separator();
      ImGui::Text("%s_", text.c_str());
      ImGui::Separator();
@@ -85064,7 +85197,7 @@ index 83e5538..d5f7193 100644
      ImGui::End();
  }
  
-@@ -567,6 +1935,19 @@ void SetTextPrompt(bool active, const std::string& prompt, const std::string& te
+@@ -567,6 +1947,19 @@ void SetTextPrompt(bool active, const std::string& prompt, const std::string& te
      prompt_active = active;
  }
  
@@ -85084,7 +85217,7 @@ index 83e5538..d5f7193 100644
  void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) {
      std::scoped_lock lock{imgui_mutex};
      if (initialized) {
-@@ -576,9 +1957,10 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count)
+@@ -576,9 +1969,10 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count)
      ImGui::CreateContext();
      ImGuiIO& io = ImGui::GetIO();
      io.IniFilename = nullptr; // window positions are not kept
@@ -85096,7 +85229,7 @@ index 83e5538..d5f7193 100644
  
      ImGui::StyleColorsDark();
      ImGuiStyle& style = ImGui::GetStyle();
-@@ -587,10 +1969,19 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count)
+@@ -587,10 +1981,19 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count)
      style.GrabRounding = 4.0f;
      style.Colors[ImGuiCol_WindowBg].w = 0.92f;
  
@@ -85116,7 +85249,7 @@ index 83e5538..d5f7193 100644
  
      const vk::Instance vk_instance = instance.GetInstance();
      ImGui_ImplVulkan_LoadFunctions(
-@@ -624,7 +2015,9 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count)
+@@ -624,7 +2027,9 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count)
          return;
      }
      initialized = true;
@@ -85127,7 +85260,7 @@ index 83e5538..d5f7193 100644
  }
  
  void UpdateTextInput(SDL_Window* window) {
-@@ -654,7 +2047,9 @@ bool HandleEvent(const SDL_Event& event) {
+@@ -654,7 +2059,9 @@ bool HandleEvent(const SDL_Event& event) {
      case SDL_EVENT_KEY_UP: {
          const bool down = event.type == SDL_EVENT_KEY_DOWN;
          if (down && !event.key.repeat &&
@@ -85138,7 +85271,7 @@ index 83e5538..d5f7193 100644
              SetOpen(event.key.key == SDLK_INSERT ? !is_open : false);
              return true;
          }
-@@ -678,7 +2073,7 @@ bool HandleEvent(const SDL_Event& event) {
+@@ -678,7 +2085,7 @@ bool HandleEvent(const SDL_Event& event) {
          } else if (button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
              r3_down = down;
          }
@@ -85147,7 +85280,7 @@ index 83e5538..d5f7193 100644
              SetOpen(!is_open);
              return true;
          }
-@@ -690,6 +2085,19 @@ bool HandleEvent(const SDL_Event& event) {
+@@ -690,6 +2097,19 @@ bool HandleEvent(const SDL_Event& event) {
          }
          return true;
      }
@@ -85874,7 +86007,7 @@ index f88cc52..ad6ad5e 100644
  } // namespace BbSections
  
 diff --git a/gpu/shim/bbport_settings.cpp b/gpu/shim/bbport_settings.cpp
-index cf4fbd8..e3f46a1 100644
+index cf4fbd8..36c81a0 100644
 --- a/gpu/shim/bbport_settings.cpp
 +++ b/gpu/shim/bbport_settings.cpp
 @@ -6,9 +6,11 @@
@@ -85889,7 +86022,7 @@ index cf4fbd8..e3f46a1 100644
  #include <cstdio>
  #include <cmath>
  #include <cstdlib>
-@@ -24,26 +26,145 @@ namespace {
+@@ -24,26 +26,147 @@ namespace {
  
  const char* Path() {
      const char* env = std::getenv("BB_CONFIG");
@@ -86015,6 +86148,8 @@ index cf4fbd8..e3f46a1 100644
 +        int nearest = heights[0];
 +        for (int h : heights) if (std::abs(h - i) < std::abs(nearest - i)) nearest = h;
 +        v.dlss_nr_height = i == 0 ? 0 : nearest;
++    } else if (key == "dlss_nr_model_scale") {
++        v.dlss_nr_model_scale = Clamp(std::isfinite(f) ? f : 1.0f, 0.5f, 1.0f);
 +    } else if (key == "dlss_nr_preset") {
 +        v.dlss_nr_preset = i >= 0 && i <= 3 ? i : 0;
 +    } else if (key == "dlss_nr_passes") {
@@ -86039,7 +86174,7 @@ index cf4fbd8..e3f46a1 100644
      } else if (key == "preset") {
          v.preset = std::clamp(i, 0, PresetCount - 1);
      } else if (key == "sharpen") {
-@@ -63,9 +184,39 @@ void Set(Values& v, const std::string& key, const std::string& value) {
+@@ -63,9 +186,39 @@ void Set(Values& v, const std::string& key, const std::string& value) {
      } else if (key == "reactive_max") {
          v.reactive_max = Clamp(f, 0.0f, 1.0f);
      } else if (key == "debug_view") {
@@ -86080,7 +86215,7 @@ index cf4fbd8..e3f46a1 100644
      } else if (key == "menu_pos") {
          float x = -1.0f, y = -1.0f;
          if (std::sscanf(value.c_str(), "%f,%f", &x, &y) == 2 && x >= 0.0f && x <= 1.0f && y >= 0.0f &&
-@@ -73,6 +224,18 @@ void Set(Values& v, const std::string& key, const std::string& value) {
+@@ -73,6 +226,18 @@ void Set(Values& v, const std::string& key, const std::string& value) {
              v.menu_x = x;
              v.menu_y = y;
          }
@@ -86099,7 +86234,7 @@ index cf4fbd8..e3f46a1 100644
      } else if (key == "fsr4_auto_exposure") {
          v.fsr4_auto_exposure = i != 0;
      } else if (key == "fsr4_invert_jitter") {
-@@ -85,12 +248,38 @@ void Set(Values& v, const std::string& key, const std::string& value) {
+@@ -85,12 +250,38 @@ void Set(Values& v, const std::string& key, const std::string& value) {
          v.mouse_camera=i!=0;
      } else if (key == "mouse_menu") {
          v.mouse_menu=i!=0;
@@ -86138,7 +86273,7 @@ index cf4fbd8..e3f46a1 100644
      } else if (key == "mouse_sensitivity") {
          v.mouse_sensitivity=std::clamp(i,0,10);
      } else if (key == "camera_controls") {
-@@ -109,22 +298,85 @@ void Set(Values& v, const std::string& key, const std::string& value) {
+@@ -109,22 +300,85 @@ void Set(Values& v, const std::string& key, const std::string& value) {
          v.graphics_controls=i!=0;
      } else if (key == "graphics_vignette") {
          v.graphics_vignette=i!=0;
@@ -86229,7 +86364,7 @@ index cf4fbd8..e3f46a1 100644
              if (value == std::to_string(OutputWidths[r]) + "x" + std::to_string(OutputHeights[r])) {
                  v.output_res = r;
              }
-@@ -138,15 +390,106 @@ void Set(Values& v, const std::string& key, const std::string& value) {
+@@ -138,15 +392,106 @@ void Set(Values& v, const std::string& key, const std::string& value) {
      }
  }
  
@@ -86316,7 +86451,7 @@ index cf4fbd8..e3f46a1 100644
 +        &Values::camera_fov_scale, &Values::camera_distance_scale, &Values::camera_height_scale,
 +        &Values::fps_scale, &Values::fps_text_opacity, &Values::fps_bg_opacity,
 +        &Values::dlss_nr_intensity, &Values::dlss_nr_local_structure, &Values::dlss_nr_local_tone,
-+        &Values::dlss_nr_skin_structure, &Values::dlss_nr_white_point,
++        &Values::dlss_nr_skin_structure, &Values::dlss_nr_white_point, &Values::dlss_nr_model_scale,
 +    };
 +    for (auto member : members) if (&value == &(current.*member)) return (defaults.*member).load();
 +    for (int pass = 0; pass < 2; ++pass) {
@@ -86337,7 +86472,7 @@ index cf4fbd8..e3f46a1 100644
  }
  
  void Load() {
-@@ -154,7 +497,7 @@ void Load() {
+@@ -154,7 +499,7 @@ void Load() {
      for (int e = 0; e < EffectCount; ++e) {
          v.effects[e] = Effects[e].default_on;
      }
@@ -86346,7 +86481,7 @@ index cf4fbd8..e3f46a1 100644
      // launcher's (BB_MENU_LANGUAGE), else the system's, as the launcher picks its own.
      {
          const char* lang = std::getenv("BB_MENU_LANGUAGE");
-@@ -166,9 +509,7 @@ void Load() {
+@@ -166,9 +511,7 @@ void Load() {
                  }
              }
          }
@@ -86357,7 +86492,7 @@ index cf4fbd8..e3f46a1 100644
      }
      if (FILE* file = std::fopen(Path(), "r")) {
          char line[256];
-@@ -196,13 +537,26 @@ void Load() {
+@@ -196,13 +539,27 @@ void Load() {
          {"BB_REACTIVE", "reactive"},              {"BB_REACTIVE_SCALE", "reactive_scale"},
          {"BB_REACTIVE_THRESHOLD", "reactive_threshold"}, {"BB_REACTIVE_MAX", "reactive_max"},
          {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
@@ -86369,6 +86504,7 @@ index cf4fbd8..e3f46a1 100644
 +        {"BB_REFLEX", "reflex"},                   {"BB_RENDER_SCALE", "render_scale"},
 +        {"BB_MIP_BIAS", "mip_bias"},
 +        {"BB_DLSS_NR", "dlss_nr"},                  {"BB_DLSS_NR_HEIGHT", "dlss_nr_height"},
++        {"BB_DLSS_NR_MODEL_SCALE", "dlss_nr_model_scale"},
      };
      for (const auto& [env, key] : env_keys) {
          if (const char* value = std::getenv(env)) {
@@ -86384,7 +86520,7 @@ index cf4fbd8..e3f46a1 100644
      v.startup_upscaler = v.upscaler;
      v.startup_object_motion = v.object_motion;
      for (int e = 0; e < EffectCount; ++e) {
-@@ -211,6 +565,11 @@ void Load() {
+@@ -211,6 +568,11 @@ void Load() {
      v.startup_model_lod = v.model_lod;
      v.startup_output_res = v.output_res;
      v.startup_live_resolution = v.live_resolution;
@@ -86396,7 +86532,7 @@ index cf4fbd8..e3f46a1 100644
  }
  
  void ConfigureUpscalerSupport(bool fsr4, bool fsr411, bool dlss) {
-@@ -223,6 +582,12 @@ void ConfigureUpscalerSupport(bool fsr4, bool fsr411, bool dlss) {
+@@ -223,6 +585,12 @@ void ConfigureUpscalerSupport(bool fsr4, bool fsr411, bool dlss) {
          v.fsr4_problem = "DLSS needs an NVIDIA RTX GPU, its driver's NGX and nvngx_dlss; using FSR 3.1";
          std::printf("Upscaler: dlss unavailable; falling back to FSR 3.1 before the first frame\n");
          v.upscaler = UpscalerFsr3;
@@ -86409,7 +86545,7 @@ index cf4fbd8..e3f46a1 100644
      } else if ((requested == UpscalerFsr4 && !v.fsr4_supported) ||
          (requested == UpscalerFsr411 && !v.fsr411_supported)) {
          v.fsr4_problem = "GPU does not support the selected FSR 4 shaders; using FSR 3.1";
-@@ -248,8 +613,11 @@ bool ResolutionNeedsRestart() {
+@@ -248,8 +616,11 @@ bool ResolutionNeedsRestart() {
      // TAA needs the live path (native guest targets): run.sh selects it on restart.
      return FixedRenderSession() &&
          (v.preset != v.startup_preset || v.output_res != v.startup_output_res ||
@@ -86422,7 +86558,7 @@ index cf4fbd8..e3f46a1 100644
  }
  
  void Save() {
-@@ -257,16 +625,22 @@ void Save() {
+@@ -257,16 +628,22 @@ void Save() {
      // The keys the menu writes, in this order; the rest of the file stays as it is: the
      // launcher's controls (key.* / pad.*) and its other keys, comments.
      std::vector<std::pair<std::string, std::string>> keys;
@@ -86447,7 +86583,7 @@ index cf4fbd8..e3f46a1 100644
      put("sharpen", flag(v.sharpen));
      put("sharpness", fixed(v.sharpness, 2));
      put("jitter", flag(v.jitter));
-@@ -275,38 +649,109 @@ void Save() {
+@@ -275,38 +652,110 @@ void Save() {
      put("reactive_scale", fixed(v.reactive_scale, 2));
      put("reactive_threshold", fixed(v.reactive_threshold, 2));
      put("reactive_max", fixed(v.reactive_max, 2));
@@ -86478,6 +86614,7 @@ index cf4fbd8..e3f46a1 100644
 +    put("dlss_auto_exposure", flag(v.dlss_auto_exposure));
 +    put("dlss_nr", flag(v.dlss_nr));
 +    put("dlss_nr_height", std::to_string(v.dlss_nr_height.load()));
++    put("dlss_nr_model_scale", fixed(v.dlss_nr_model_scale, 3));
 +    put("dlss_nr_preset", std::to_string(v.dlss_nr_preset.load()));
 +    put("dlss_nr_passes", std::to_string(v.dlss_nr_passes.load()));
 +    put("dlss_nr_customize_passes", v.dlss_nr_customize_passes ? "1" : "0");
@@ -86560,7 +86697,7 @@ index cf4fbd8..e3f46a1 100644
      // Read by run.sh at start.
      put("live_resolution", v.live_resolution < 0 ? "auto" : flag(v.live_resolution != 0));
      if (v.menu_x >= 0.0f && v.menu_y >= 0.0f) {
-@@ -341,7 +786,7 @@ void Save() {
+@@ -341,7 +790,7 @@ void Save() {
          std::fclose(file);
      }
      if (!had_lines) {
@@ -86569,7 +86706,7 @@ index cf4fbd8..e3f46a1 100644
      }
      for (size_t k = 0; k < keys.size(); ++k) {
          if (!written[k]) {
-@@ -364,16 +809,99 @@ void Save() {
+@@ -364,16 +813,111 @@ void Save() {
  }
  
  float PresetScale(int preset) {
@@ -86624,6 +86761,18 @@ index cf4fbd8..e3f46a1 100644
 +    return {w, h};
 +}
 +
++std::pair<int, int> DlssNrModelSize(int scene_width, int scene_height) {
++    if (scene_width < 4 || scene_height < 4) return {0, 0};
++    const float saved = Get().dlss_nr_model_scale;
++    const float scale = std::clamp(std::isfinite(saved) ? saved : 1.0f, 0.5f, 1.0f);
++    if (scale == 1.0f) return {scene_width, scene_height};
++    const int h = std::clamp(int(std::lround(scene_height * scale / 4.0f)) * 4,
++                             4, scene_height / 4 * 4);
++    const int w = std::clamp(int(std::lround(double(scene_width) * h / scene_height / 4.0)) * 4,
++                             4, scene_width / 4 * 4);
++    return {w, h};
++}
++
 +int DlssNrModelPreset(int output_width, int output_height, int preset) {
 +    if (!Get().dlss_nr || Get().upscaler != UpscalerDlss || preset == NativeAA) {
 +        return ModelPreset(preset);
@@ -86673,7 +86822,7 @@ index cf4fbd8..e3f46a1 100644
      static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa",
                                                                    "dlss"};
 diff --git a/gpu/shim/bbport_settings.h b/gpu/shim/bbport_settings.h
-index c0e8a94..0098559 100644
+index c0e8a94..3cf1051 100644
 --- a/gpu/shim/bbport_settings.h
 +++ b/gpu/shim/bbport_settings.h
 @@ -1,11 +1,13 @@
@@ -86858,7 +87007,7 @@ index c0e8a94..0098559 100644
      std::atomic<bool> sharpen{true};
      std::atomic<float> sharpness{0.3f};
      std::atomic<bool> jitter{true};
-@@ -65,46 +184,164 @@ struct Values {
+@@ -65,46 +184,170 @@ struct Values {
      std::atomic<float> reactive_max{0.9f};
      std::atomic<int> debug_view{DebugNone};
      std::atomic<bool> show_fps{false};
@@ -86958,6 +87107,9 @@ index c0e8a94..0098559 100644
 +    /// user-supplied; failures disable this pass without affecting ordinary DLSS SR.
 +    std::atomic<bool> dlss_nr{false};
 +    std::atomic<int> dlss_nr_height{720};
++    /// Model-only scale, independent of scene/SR input. 1 is the original full-resolution path.
++    /// The 720p Optimized comparison uses 0.75; the same mechanism works at any input height.
++    std::atomic<float> dlss_nr_model_scale{1.0f};
 +    std::atomic<int> dlss_nr_preset{0}, dlss_nr_style{0};
 +    std::atomic<int> dlss_nr_passes{1}; ///< chained models, each with independent temporal history
 +    std::atomic<bool> dlss_nr_customize_passes{false};
@@ -86969,8 +87121,11 @@ index c0e8a94..0098559 100644
 +    std::atomic<const char*> dlss_nr_problem{"inactive"};
 +    std::atomic<int> dlss_nr_state{0}, dlss_nr_effective_width{0},
 +        dlss_nr_effective_height{0};
++    std::atomic<int> dlss_nr_model_width{0}, dlss_nr_model_height{0};
 +    std::atomic<unsigned long long> dlss_nr_frames{0};
 +    std::atomic<float> dlss_nr_gpu_ms{0.0f};
++    std::atomic<float> dlss_nr_encode_ms{0}, dlss_nr_evaluate_ms{0},
++        dlss_nr_resolve_ms{0}, dlss_nr_copy_ms{0};
 +    /// render_scale (BB_RENDER_SCALE): the Custom preset's output / render ratio; live as presets.
 +    std::atomic<float> render_scale{1.3f};
 +    /// mip_bias (BB_MIP_BIAS): texture LOD bias added while an upscaler runs (MipBiasMin..Max); live.
@@ -87024,7 +87179,7 @@ index c0e8a94..0098559 100644
  
  /// Reads the file, then the environment overrides. Called once at start.
  void Load();
-@@ -117,9 +354,18 @@ bool ResolutionNeedsRestart();
+@@ -117,9 +360,20 @@ bool ResolutionNeedsRestart();
  /// Writes the file (menu changes).
  void Save();
  
@@ -87037,6 +87192,8 @@ index c0e8a94..0098559 100644
 +int ModelPreset(int preset);
 +/// Exact NR input size and the nearest existing DLSS quality mode for it.
 +std::pair<int, int> DlssNrSize(int output_width, int output_height, int preset);
++/// Model size from the actual scene input, clamped to it and aligned to four pixels.
++std::pair<int, int> DlssNrModelSize(int scene_width, int scene_height);
 +int DlssNrModelPreset(int output_width, int output_height, int preset);
 +/// dlss_preset letters NVIDIA's DLSS 310.9 knows: E, F (CNN), J, K, L, M (transformer); A-D are
 +/// removed and G-I, N, O fall back to its default.
@@ -122122,10 +122279,10 @@ index 75eca24..3b9c130 100644
  
 diff --git a/tests/test_hdr_native.cpp b/tests/test_hdr_native.cpp
 new file mode 100644
-index 0000000..a0943fc
+index 0000000..40833aa
 --- /dev/null
 +++ b/tests/test_hdr_native.cpp
-@@ -0,0 +1,1154 @@
+@@ -0,0 +1,1276 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +// Runs native HDR output's shaders (hdr_native.comp, docs/hdr.md) on a synthetic frame: a scene
 +// with midtones, a highlight 8x brighter than SDR white, NaN/inf texels, bloom (SDR brighter than
@@ -122151,6 +122308,7 @@ index 0000000..a0943fc
 +#include "video_core/host_shaders/hdr_native_snapshot_comp.h"
 +#include "video_core/host_shaders/hdr_native_stats_comp.h"
 +#include "video_core/host_shaders/dlss_nr_comp.h"
++#include "video_core/host_shaders/dlss_nr_scaled_comp.h"
 +
 +namespace {
 +
@@ -122776,12 +122934,133 @@ index 0000000..a0943fc
 +    vkFreeMemory(vk.device, staging.memory, nullptr);
 +}
 +
++// Exercise the actual reduced-model shader without the proprietary runtime. An
++// identity model must preserve full-resolution high-frequency detail and alpha;
++// guides must select a common foreground surface and use MODEL pixel motion.
++void TestNrScaled(const Vk& vk) {
++    constexpr unsigned MW = 48, MH = 24;
++    const std::array<VkDescriptorPoolSize, 2> sizes{{
++        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 5}, {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4}}};
++    VkDescriptorPool pool{};
++    const VkDescriptorPoolCreateInfo pi{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
++        .maxSets = 1, .poolSizeCount = 2, .pPoolSizes = sizes.data()};
++    CHECK(vkCreateDescriptorPool(vk.device, &pi, nullptr, &pool));
++    const Pass pass = MakePass(vk, pool, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
++        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
++        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
++        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
++        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}, 32,
++        DLSS_NR_SCALED_COMP, sizeof(DLSS_NR_SCALED_COMP));
++    std::array<Image, 8> images{
++        MakeImage(vk, VK_FORMAT_R16G16B16A16_SFLOAT, W, H, 8),
++        MakeImage(vk, VK_FORMAT_R32_SFLOAT, W, H, 4),
++        MakeImage(vk, VK_FORMAT_R16G16_SFLOAT, W, H, 4),
++        MakeImage(vk, VK_FORMAT_R16G16B16A16_SFLOAT, MW, MH, 8),
++        MakeImage(vk, VK_FORMAT_R16G16B16A16_SFLOAT, MW, MH, 8),
++        MakeImage(vk, VK_FORMAT_R32_SFLOAT, MW, MH, 4),
++        MakeImage(vk, VK_FORMAT_R16G16_SFLOAT, MW, MH, 4),
++        MakeImage(vk, VK_FORMAT_R16G16B16A16_SFLOAT, W, H, 8)};
++    const Buffer staging = MakeBuffer(vk, VkDeviceSize(W) * H * 8,
++        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
++    VkSampler sampler{};
++    const VkSamplerCreateInfo si{.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
++        .magFilter = VK_FILTER_NEAREST, .minFilter = VK_FILTER_NEAREST,
++        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
++        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
++        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
++    CHECK(vkCreateSampler(vk.device, &si, nullptr, &sampler));
++    Begin(vk);
++    for (const auto& image : images) {
++        const VkImageMemoryBarrier bar{.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
++            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
++            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_GENERAL,
++            .image = image.image, .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
++        vkCmdPipelineBarrier(vk.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
++            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &bar);
++    }
++    Submit(vk);
++    const auto bind = [&](bool resolve) {
++        const std::array<unsigned, 9> indices{0, 1, resolve ? 5u : 2u, 3, 4, 3, 5, 6, 7};
++        std::array<VkDescriptorImageInfo, 9> infos;
++        std::array<VkWriteDescriptorSet, 9> writes{};
++        for (unsigned i = 0; i < indices.size(); ++i) {
++            infos[i] = {i < 5 ? sampler : VK_NULL_HANDLE, images[indices[i]].view, VK_IMAGE_LAYOUT_GENERAL};
++            writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = pass.set,
++                .dstBinding = i, .descriptorCount = 1, .descriptorType = pass.types[i], .pImageInfo = &infos[i]};
++        }
++        vkUpdateDescriptorSets(vk.device, unsigned(writes.size()), writes.data(), 0, nullptr);
++    };
++    struct Push { uint32_t mode, width, height, hdr; float white, strength; uint32_t sw, sh; };
++    std::vector<uint16_t> input(W * H * 4), motion(W * H * 2);
++    std::vector<float> depth(W * H);
++    for (unsigned hdr = 0; hdr < 2; ++hdr) {
++        for (unsigned y = 0; y < H; ++y) for (unsigned x = 0; x < W; ++x) {
++            const unsigned i = y * W + x;
++            const bool foreground = x < 31; // crosses model footprints, deliberately unaligned
++            const float value = i < 16 ? std::ldexp(1.0f, -int(i + 8)) :
++                ((x + y) % 2 ? 0.8f : 0.1f) * (hdr ? 12.0f : 1.0f);
++            for (unsigned c = 0; c < 3; ++c) input[i * 4 + c] = ToHalf(value * (1.0f - 0.2f * c));
++            input[i * 4 + 3] = ToHalf(float(x % 8) / 8);
++            depth[i] = foreground ? 0.2f : 0.8f;
++            motion[i * 2] = ToHalf(foreground ? 8.0f : -16.0f);
++            motion[i * 2 + 1] = ToHalf(foreground ? -4.0f : 6.0f);
++        }
++        Upload(vk, staging, images[0], input.data());
++        Upload(vk, staging, images[1], depth.data());
++        Upload(vk, staging, images[2], motion.data());
++        bind(false);
++        const Push encode{0, MW, MH, hdr, 2.971f, 1.0f, W, H};
++        Begin(vk); Dispatch(vk.cmd, pass, &encode, sizeof(encode), (MW + 7) / 8, (MH + 7) / 8); Submit(vk);
++        const auto proxy = Download<uint16_t>(vk, staging, images[3]);
++        const auto reduced_depth = Download<float>(vk, staging, images[5]);
++        const auto reduced_motion = Download<uint16_t>(vk, staging, images[6]);
++        for (unsigned y = 0; y < MH; ++y) for (unsigned x = 0; x < MW; ++x) {
++            const unsigned i = y * MW + x;
++            const bool foreground = float(x) * W / MW < 31.0f;
++            assert(std::abs(reduced_depth[i] - (foreground ? 0.2f : 0.8f)) < 1e-6f);
++            assert(std::abs(FromHalf(reduced_motion[i * 2]) - (foreground ? 6.0f : -12.0f)) < 0.01f);
++            assert(std::abs(FromHalf(reduced_motion[i * 2 + 1]) - (foreground ? -3.0f : 4.5f)) < 0.01f);
++        }
++        Upload(vk, staging, images[4], proxy.data());
++        bind(true);
++        const Push resolve{1, MW, MH, hdr, 2.971f, 1.0f, W, H};
++        Begin(vk); Dispatch(vk.cmd, pass, &resolve, sizeof(resolve), (W + 7) / 8, (H + 7) / 8); Submit(vk);
++        const auto identity = Download<uint16_t>(vk, staging, images[7]);
++        for (unsigned i = 0; i < input.size(); ++i) {
++            assert(std::isfinite(FromHalf(identity[i])));
++            assert(std::abs(FromHalf(identity[i]) - FromHalf(input[i])) <=
++                   std::max(6e-8f, FromHalf(input[i]) * 0.002f));
++        }
++        auto brighter = proxy;
++        for (unsigned i = 0; i < MW * MH; ++i) for (unsigned c = 0; c < 3; ++c)
++            brighter[i * 4 + c] = ToHalf(std::min(0.95f, FromHalf(proxy[i * 4 + c]) * 1.1f));
++        Upload(vk, staging, images[4], brighter.data());
++        Begin(vk); Dispatch(vk.cmd, pass, &resolve, sizeof(resolve), (W + 7) / 8, (H + 7) / 8); Submit(vk);
++        const auto changed = Download<uint16_t>(vk, staging, images[7]);
++        assert(FromHalf(changed[W * 8 * 4]) > FromHalf(input[W * 8 * 4]) * 1.05f);
++        for (unsigned i = 0; i < W * H; ++i) {
++            assert(std::isfinite(FromHalf(changed[i * 4])));
++            assert(changed[i * 4 + 3] == input[i * 4 + 3]);
++        }
++        std::printf("NR scaled shader: %s detail/alpha identity, depth edges, motion units, enhancement PASS\n", hdr ? "HDR" : "LDR");
++    }
++    vkDestroySampler(vk.device, sampler, nullptr);
++    vkDestroyPipeline(vk.device, pass.pipeline, nullptr);
++    vkDestroyPipelineLayout(vk.device, pass.layout, nullptr);
++    vkDestroyDescriptorPool(vk.device, pool, nullptr);
++    vkDestroyDescriptorSetLayout(vk.device, pass.set_layout, nullptr);
++    for (const auto& image : images) { vkDestroyImageView(vk.device, image.view, nullptr);
++        vkDestroyImage(vk.device, image.image, nullptr); vkFreeMemory(vk.device, image.memory, nullptr); }
++    vkUnmapMemory(vk.device, staging.memory); vkDestroyBuffer(vk.device, staging.buffer, nullptr);
++    vkFreeMemory(vk.device, staging.memory, nullptr);
++}
++
 +} // namespace
 +
 +int main(int argc, char** argv) {
 +    std::setvbuf(stdout, nullptr, _IONBF, 0); // the lines before a failed assert too
 +    Vk vk = Init();
-+    if (argc > 1 && std::strcmp(argv[1], "--nr") == 0) { TestNrResolve(vk); return 0; }
++    if (argc > 1 && std::strcmp(argv[1], "--nr") == 0) { TestNrResolve(vk); TestNrScaled(vk); return 0; }
 +    VkDescriptorPool pool;
 +    const std::array<VkDescriptorPoolSize, 3> sizes{{
 +        {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 16},
@@ -124533,120 +124812,20 @@ index f6e80bf..d4169b5 100644
                                              bare_path=True)[0]['BB_RENDER_RES'])
  
 diff --git a/tests/test_settings.cpp b/tests/test_settings.cpp
-index 593fed4..e4531c0 100644
+index 593fed4..d0b063c 100644
 --- a/tests/test_settings.cpp
 +++ b/tests/test_settings.cpp
-@@ -1,11 +1,11 @@
+@@ -1,5 +1,5 @@
  // SPDX-License-Identifier: GPL-2.0-or-later
 -// bbport_settings.cpp: the menu saves its keys into bbport.ini and keeps the launcher's (controls).
 +// bbport_settings.cpp: the menu saves its keys into lantern.ini and keeps the launcher's (controls).
  #include <cassert>
  #include <cstdio>
  #include <cstdlib>
--#include <fstream>
--#include <filesystem>
--#include <chrono>
-+#include <fstream>
-+#include <filesystem>
-+#include <chrono>
- #include <sstream>
- #include <string>
- #include "gpu/shim/bbport_settings.h"
-@@ -18,18 +18,18 @@ static std::string Read(const char* path) {
- }
- 
- int main() {
--    const auto temporary = std::filesystem::temp_directory_path() /
--        ("bbport-settings-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
--    const std::string filename = temporary.string();
--    const char* path = filename.c_str();
-+    const auto temporary = std::filesystem::temp_directory_path() /
-+        ("bbport-settings-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-+    const std::string filename = temporary.string();
-+    const char* path = filename.c_str();
-     const char ini[] = "# launcher\nupscaler=fsr3\nkey.cross=X, Space\npad.circle=a\nshow_fps=0\n"
-                        "fullscreen_hint=1\n";
--    { std::ofstream file(path); file << ini; assert(file.good()); }
--#ifdef _WIN32
--    _putenv_s("BB_CONFIG", path);
--#else
--    setenv("BB_CONFIG", path, 1);
--#endif
-+    { std::ofstream file(path); file << ini; assert(file.good()); }
-+#ifdef _WIN32
-+    _putenv_s("BB_CONFIG", path);
-+#else
-+    setenv("BB_CONFIG", path, 1);
-+#endif
- 
-     BbSettings::Load();
-     auto& s = BbSettings::Get();
-@@ -37,8 +37,8 @@ int main() {
-     s.show_fps = true;
-     s.upscaler = BbSettings::UpscalerFsr411;
-     s.menu_x = 0.625f;
--    s.menu_y = 0.125f;
--    s.fullscreen = true;
-+    s.menu_y = 0.125f;
-+    s.fullscreen = true;
-     BbSettings::Save();
- 
-     const std::string saved = Read(path);
-@@ -47,43 +47,344 @@ int main() {
-     assert(saved.find("# launcher\nupscaler=fsr411\nkey.cross=X, Space\npad.circle=a\nshow_fps=1\n"
-                       "fullscreen_hint=1\n") == 0);
-     assert(saved.find("menu_pos=0.6250,0.1250\n") != std::string::npos);
--    assert(saved.find("upscaler=fsr3") == std::string::npos);
--    assert(saved.find("fullscreen=1\n") != std::string::npos);
-+    assert(saved.find("upscaler=fsr3") == std::string::npos);
-+    assert(saved.find("fullscreen=1\n") != std::string::npos);
- 
-     s.menu_x = -1.0f;
-     s.menu_y = -1.0f;
-     BbSettings::Load();
--    assert(s.menu_x == 0.625f && s.menu_y == 0.125f && s.upscaler == BbSettings::UpscalerFsr411);
--    // Replacing an existing file works on Windows too, and must not erase key bindings.
--    s.upscaler = BbSettings::UpscalerDlss;
--    BbSettings::Save();
--    assert(Read(path).find("upscaler=dlss\n") != std::string::npos);
--    assert(Read(path).find("key.cross=X, Space\n") != std::string::npos);
--    BbSettings::ConfigureUpscalerSupport(false, false, false);
--    assert(s.upscaler == BbSettings::UpscalerFsr3 && !s.dlss_supported);
--    s.upscaler = BbSettings::UpscalerDlss;
--    BbSettings::ConfigureUpscalerSupport(false, false, true);
--    assert(s.upscaler == BbSettings::UpscalerDlss && s.dlss_supported);
--    s.camera_controls = true;
--    s.camera_fov_scale = 1.25f;
--    s.camera_distance_scale = 0.80f;
--    s.camera_height_scale = 1.10f;
--    BbSettings::Save();
--    s.camera_controls = false;
--    s.camera_fov_scale = s.camera_distance_scale = s.camera_height_scale = 1.0f;
--    BbSettings::Load();
--    assert(s.camera_controls && s.camera_fov_scale == 1.25f);
--    assert(s.camera_distance_scale == 0.80f && s.camera_height_scale == 1.10f);
--    s.change_appearance=true;s.rebirth=true;s.graphics_controls=true;
--    s.graphics_bloom=0.7f;s.graphics_shadow_scale=1.4f;
--    BbSettings::Save();
--    s.rebirth=false;s.graphics_bloom=1.0f;
--    BbSettings::Load();
--    assert(s.change_appearance && s.rebirth && s.graphics_controls && s.graphics_bloom==0.7f && s.graphics_shadow_scale==1.4f);
--    // Edited configs must not feed infinite/NaN camera transforms to the engine.
--    { std::ofstream file(path); file << "camera_fov_scale=nan\ncamera_distance_scale=-10\ncamera_height_scale=inf\n"; }
--    BbSettings::Load();
--    assert(s.camera_fov_scale == 1.0f && s.camera_distance_scale == 0.5f && s.camera_height_scale == 1.0f);
--    std::filesystem::remove(temporary);
-+    assert(s.menu_x == 0.625f && s.menu_y == 0.125f && s.upscaler == BbSettings::UpscalerFsr411);
-+    // Replacing an existing file works on Windows too, and must not erase key bindings.
-+    s.upscaler = BbSettings::UpscalerDlss;
-+    BbSettings::Save();
-+    assert(Read(path).find("upscaler=dlss\n") != std::string::npos);
-+    assert(Read(path).find("key.cross=X, Space\n") != std::string::npos);
-+    BbSettings::ConfigureUpscalerSupport(false, false, false);
-+    assert(s.upscaler == BbSettings::UpscalerFsr3 && !s.dlss_supported);
-+    s.upscaler = BbSettings::UpscalerDlss;
-+    BbSettings::ConfigureUpscalerSupport(false, false, true);
-+    assert(s.upscaler == BbSettings::UpscalerDlss && s.dlss_supported);
+@@ -64,6 +64,13 @@ int main() {
+     s.upscaler = BbSettings::UpscalerDlss;
+     BbSettings::ConfigureUpscalerSupport(false, false, true);
+     assert(s.upscaler == BbSettings::UpscalerDlss && s.dlss_supported);
 +    // FSR 4.1.1 without its dot products, on a GPU with FSR 4: FSR 4, not 3.1.
 +    s.upscaler = BbSettings::UpscalerFsr411;
 +    BbSettings::ConfigureUpscalerSupport(true, false, false);
@@ -124654,26 +124833,13 @@ index 593fed4..e4531c0 100644
 +    s.upscaler = BbSettings::UpscalerFsr411;
 +    BbSettings::ConfigureUpscalerSupport(false, false, false);
 +    assert(s.upscaler == BbSettings::UpscalerFsr3);
-+    s.camera_controls = true;
-+    s.camera_fov_scale = 1.25f;
-+    s.camera_distance_scale = 0.80f;
-+    s.camera_height_scale = 1.10f;
-+    BbSettings::Save();
-+    s.camera_controls = false;
-+    s.camera_fov_scale = s.camera_distance_scale = s.camera_height_scale = 1.0f;
-+    BbSettings::Load();
-+    assert(s.camera_controls && s.camera_fov_scale == 1.25f);
-+    assert(s.camera_distance_scale == 0.80f && s.camera_height_scale == 1.10f);
-+    s.change_appearance=true;s.rebirth=true;s.graphics_controls=true;
-+    s.graphics_bloom=0.7f;s.graphics_shadow_scale=1.4f;
-+    BbSettings::Save();
-+    s.rebirth=false;s.graphics_bloom=1.0f;
-+    BbSettings::Load();
-+    assert(s.change_appearance && s.rebirth && s.graphics_controls && s.graphics_bloom==0.7f && s.graphics_shadow_scale==1.4f);
-+    // Edited configs must not feed infinite/NaN camera transforms to the engine.
-+    { std::ofstream file(path); file << "camera_fov_scale=nan\ncamera_distance_scale=-10\ncamera_height_scale=inf\n"; }
-+    BbSettings::Load();
-+    assert(s.camera_fov_scale == 1.0f && s.camera_distance_scale == 0.5f && s.camera_height_scale == 1.0f);
+     s.camera_controls = true;
+     s.camera_fov_scale = 1.25f;
+     s.camera_distance_scale = 0.80f;
+@@ -84,6 +91,321 @@ int main() {
+     { std::ofstream file(path); file << "camera_fov_scale=nan\ncamera_distance_scale=-10\ncamera_height_scale=inf\n"; }
+     BbSettings::Load();
+     assert(s.camera_fov_scale == 1.0f && s.camera_distance_scale == 0.5f && s.camera_height_scale == 1.0f);
 +    // Menu languages: the code is read and written back; the added languages translate by the
 +    // English text and fall back to it; Russian keeps its own text.
 +    { std::ofstream file(path); file << "menu_language=pt_BR\n"; }
@@ -124876,6 +125042,27 @@ index 593fed4..e4531c0 100644
 +    s.upscaler = BbSettings::UpscalerDlss;
 +    s.dlss_nr = true;
 +    s.dlss_nr_height = 720;
++    assert((BbSettings::DlssNrModelSize(1280, 720) == std::pair<int, int>(1280, 720)));
++    s.dlss_nr_model_scale = 0.75f;
++    assert((BbSettings::DlssNrModelSize(1280, 720) == std::pair<int, int>(960, 540)));
++    assert((BbSettings::DlssNrModelSize(1920, 1080) == std::pair<int, int>(1444, 812)));
++    // Model scaling never changes scene/SR input or its quality mode, even in DLAA.
++    assert((BbSettings::DlssNrSize(1920, 1080, BbSettings::Quality) == std::pair<int, int>(1280, 720)));
++    assert(BbSettings::DlssNrModelPreset(1920, 1080, BbSettings::Quality) == BbSettings::Quality);
++    const auto wide_model = BbSettings::DlssNrModelSize(1720, 720);
++    assert(wide_model.first == 1292 && wide_model.second == 540);
++    assert((BbSettings::DlssNrModelSize(0, 0) == std::pair<int, int>(0, 0)));
++    assert((BbSettings::DlssNrModelSize(4, 4) == std::pair<int, int>(4, 4)));
++    BbSettings::Save();
++    s.dlss_nr_model_scale = 1.0f;
++    BbSettings::Load();
++    assert(s.dlss_nr_model_scale == 0.75f);
++    { std::ofstream file(path); file << "dlss_nr_model_scale=nan\n"; }
++    BbSettings::Load(); assert(s.dlss_nr_model_scale == 1.0f);
++    { std::ofstream file(path); file << "dlss_nr_model_scale=0.1\n"; }
++    BbSettings::Load(); assert(s.dlss_nr_model_scale == 0.5f);
++    { std::ofstream file(path); file << "dlss_nr_model_scale=2\n"; }
++    BbSettings::Load(); assert(s.dlss_nr_model_scale == 1.0f);
 +    assert((BbSettings::DlssNrSize(1920, 1080, BbSettings::Quality) == std::pair<int, int>(1280, 720)));
 +    assert((BbSettings::DlssNrSize(3440, 1440, BbSettings::Quality) == std::pair<int, int>(1720, 720)));
 +    assert((BbSettings::DlssNrSize(1920, 1080, BbSettings::NativeAA) == std::pair<int, int>(1920, 1080)));
@@ -124968,7 +125155,7 @@ index 593fed4..e4531c0 100644
 +    BbSettings::Load();
 +    assert(s.frame_gen == BbSettings::FrameGenFsr3 && s.reflex == BbSettings::ReflexOn &&
 +           s.render_scale == BbSettings::RenderScaleMax);
-+    std::filesystem::remove(temporary);
+     std::filesystem::remove(temporary);
      std::puts("PASS: settings save keeps other keys, menu position");
  }
 diff --git a/tests/test_tone_curve.cpp b/tests/test_tone_curve.cpp
@@ -126564,3 +126751,184 @@ index 0000000..a3e6357
 +
 +if __name__ == '__main__':
 +    main()
+diff --git a/gpu/shadps4/video_core/host_shaders/dlss_nr_scaled.comp b/gpu/shadps4/video_core/host_shaders/dlss_nr_scaled.comp
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/host_shaders/dlss_nr_scaled.comp
+@@ -0,0 +1,100 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++#version 460
++#extension GL_EXT_scalar_block_layout : require
++
++// Reduced model input, full-scene ratio reconstruction. Uses the RC1 composition's
++// RenoDX-derived (MIT) 75% luminance / 25% chroma ratio and original scene alpha.
++layout(local_size_x = 8, local_size_y = 8) in;
++layout(binding = 0) uniform sampler2D scene_image;
++layout(binding = 1) uniform sampler2D scene_depth;
++layout(binding = 2) uniform sampler2D scene_motion;
++layout(binding = 3) uniform sampler2D proxy_image;
++layout(binding = 4) uniform sampler2D model_image;
++layout(binding = 5, rgba16f) uniform writeonly image2D proxy_out;
++layout(binding = 6, r32f) uniform writeonly image2D depth_out;
++layout(binding = 7, rg16f) uniform writeonly image2D motion_out;
++layout(binding = 8, rgba16f) uniform writeonly image2D resolved_out;
++layout(push_constant, scalar) uniform Push {
++    uint mode, width, height, hdr;
++    float white_point, strength;
++    uint scene_width, scene_height;
++} p;
++
++vec3 linear_to_srgb(vec3 x) {
++    return mix(12.92 * x, 1.055 * pow(max(x, 0.0), vec3(1.0 / 2.4)) - 0.055,
++               greaterThan(x, vec3(0.0031308)));
++}
++vec3 decode(vec3 x) {
++    if (p.hdr == 0) return x;
++    x = mix(x / 12.92, pow(max((x + 0.055) / 1.055, 0.0), vec3(2.4)),
++            greaterThan(x, vec3(0.04045)));
++    x = clamp(x, 0.0, 0.9995);
++    return x / max(1.0 - x, 1e-4) * p.white_point;
++}
++vec3 ratio_at(ivec2 q) {
++    q = clamp(q, ivec2(0), ivec2(p.width, p.height) - 1);
++    vec3 base = max(decode(texelFetch(proxy_image, q, 0).rgb), 0.0);
++    vec3 model = max(decode(texelFetch(model_image, q, 0).rgb), 0.0);
++    float a = dot(base, vec3(0.2126, 0.7152, 0.0722));
++    float b = dot(model, vec3(0.2126, 0.7152, 0.0722));
++    return mix(vec3(clamp((b + 1e-4) / (a + 1e-4), 0.0, 2.0)),
++               clamp((model + 1e-4) / (base + 1e-4), 0.0, 2.0), 0.25);
++}
++
++void main() {
++    ivec2 q = ivec2(gl_GlobalInvocationID.xy);
++    ivec2 scene_size = ivec2(p.scene_width, p.scene_height);
++    if (p.mode == 0) {
++        if (any(greaterThanEqual(q, ivec2(p.width, p.height)))) return;
++        // Exact box footprint in scene pixels. Select depth and motion from the
++        // SAME nearest visible surface; never average motion across silhouettes.
++        vec2 scale = vec2(scene_size) / vec2(p.width, p.height);
++        vec2 lo = vec2(q) * scale, hi = vec2(q + 1) * scale;
++        vec4 color = vec4(0);
++        float weight = 0.0, nearest = 1e30;
++        vec2 motion = vec2(0);
++        for (int y = int(floor(lo.y)); y < int(ceil(hi.y)); ++y)
++        for (int x = int(floor(lo.x)); x < int(ceil(hi.x)); ++x) {
++            ivec2 s = clamp(ivec2(x, y), ivec2(0), scene_size - 1);
++            vec2 overlap = max(min(vec2(x + 1, y + 1), hi) - max(vec2(x, y), lo), 0.0);
++            float w = overlap.x * overlap.y;
++            color += texelFetch(scene_image, s, 0) * w;
++            weight += w;
++            float d = texelFetch(scene_depth, s, 0).r;
++            if (w > 0.0 && d < nearest) {
++                nearest = d;
++                motion = texelFetch(scene_motion, s, 0).xy;
++            }
++        }
++        color /= max(weight, 1e-8);
++        vec3 encoded = color.rgb;
++        if (p.hdr != 0) {
++            vec3 x = max(color.rgb / max(p.white_point, 1e-4), 0.0);
++            encoded = linear_to_srgb(x / (1.0 + x));
++        }
++        imageStore(proxy_out, q, vec4(encoded, color.a));
++        imageStore(depth_out, q, vec4(nearest));
++        // Previous-minus-current pixels now expressed in MODEL pixel units.
++        imageStore(motion_out, q, vec4(motion / scale, 0, 0));
++        return;
++    }
++    if (any(greaterThanEqual(q, scene_size))) return;
++    vec4 scene = texelFetch(scene_image, q, 0);
++    vec2 at = (vec2(q) + 0.5) * vec2(p.width, p.height) / vec2(scene_size) - 0.5;
++    ivec2 lo = ivec2(floor(at));
++    vec2 f = fract(at);
++    vec3 ratio = vec3(0);
++    float weight = 0.0, z = texelFetch(scene_depth, q, 0).r;
++    for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
++        ivec2 s = clamp(lo + ivec2(x, y), ivec2(0), ivec2(p.width, p.height) - 1);
++        // Reuse binding 2 for the reduced R32F depth during reconstruction.
++        float d = texelFetch(scene_motion, s, 0).r;
++        float w = (x == 0 ? 1.0 - f.x : f.x) * (y == 0 ? 1.0 - f.y : f.y);
++        w /= 1.0 + abs(z - d) * 10000.0;
++        ratio += ratio_at(s) * w;
++        weight += w;
++    }
++    ratio /= max(weight, 1e-8);
++    vec3 result = mix(scene.rgb, max(scene.rgb, 0.0) * ratio, clamp(p.strength, 0.0, 1.0));
++    imageStore(resolved_out, q, vec4(result, scene.a));
++}
+diff --git a/docs/nr-model-scaling.md b/docs/nr-model-scaling.md
+new file mode 100644
+--- /dev/null
++++ b/docs/nr-model-scaling.md
+@@ -0,0 +1,71 @@
++# Model-only NR scaling
++
++`dlss_nr_model_scale` is a reusable runtime control, clamped to 0.5..1.0 (default
++1.0). It does not change the scene/render resolution, the DLSS SR input size, or
++the DLSS quality mode. Model dimensions follow the actual scene's aspect ratio,
++round to multiples of four, and never exceed the scene.
++
++The normal resolution list (720p, 1080p, etc.) is independent of the adjacent
++**Performance** checkbox in both launcher variants and the in-game overlay.
++Checking it sets `dlss_nr_model_scale=0.750`; unchecking sets 1.000. The toggle
++preserves the selected input height, intensity, mask, style, pass count, and all
++other game settings. Changing height preserves Performance. The same mechanism
++works with any scene input height, including DLAA; changing only Performance is
++live. Changing scene height in a startup-patched session still needs a restart.
++Existing test INIs with scale 0.750 automatically show Performance checked.
++No named optimized resolution entries or extra visible model-scale slider remain.
++
++## Processing
++
++The standard scale-1 shader and model input remain the RC1 path. Reduced-model
++processing uses a separate shader:
++
++1. Area-filter scene color into the smaller model input before HDR proxy encoding.
++2. Select the nearest depth surface in each footprint and that surface's motion.
++   Convert motion from scene pixels to model pixels using the actual X/Y ratios.
++3. Evaluate each enabled NR feature at model dimensions; all chained passes stay
++   at that size and preserve independent histories.
++4. Reconstruct a depth-weighted bilinear enhancement ratio over the original
++   scene, using the same 75% luminance / 25% chroma composition as RC1. Preserve
++   scene alpha and full scene detail rather than upscaling the model's RGB output.
++5. Feed the composited scene at its unchanged input dimensions to DLSS SR.
++
++Resource/feature keys include scene and model dimensions. Changing scale waits
++for submitted work, rebuilds owned resources at a safe submission boundary,
++resets NR history, and requests a downstream SR history reset. No `Finish()` is
++introduced after a caller obtains its active command buffer.
++
++The reduced path avoids the extra full-scene `original` image/copy. It retains
++the final resolve blit for now to avoid simultaneous sampled read and storage
++write of the game image. The closed NVIDIA model is not modified.
++
++## Profiling and diagnostics
++
++The overlay reports scene/SR and NR model dimensions separately. Optional
++`BB_DLSS_NR_PROFILE=1` adds delayed, non-blocking timestamps for encode/guides,
++model evaluation, ratio reconstruction, and the final copy. These timestamps
++are diagnostic and can perturb scheduling; keep them off for final FPS samples.
++
++Same-frame captures include per-plane dimensions in `settings.txt`, because the
++original/resolve planes use scene dimensions while proxy/model planes use model
++dimensions. Diagnostic tooling must read those dimensions, not assume one size.
++
++`hdr-native-shader-test --nr` tests both paths without the proprietary model.
++The reduced shader test covers high-frequency scene/alpha identity, near-black
++values, foreground guide selection, motion units, and nonidentity enhancement.
++Settings tests cover persistence, alignment, aspect, invalid scales, and stable
++scene/SR size. `NrOptimizationChecks` verifies both launcher profile mappings.
++
++## Motion-adaptive follow-up
++
++Camera and object motion vectors already exist and can estimate screen motion.
++Without gaze tracking, a fixed central region plus motion-adaptive peripheral
++enhancement would be an approximation of foveated rendering. The closed runtime
++has no validated per-tile work mask: masking composition alone does not save NR
++evaluation cost. Cropped/tiled evaluation needs independent histories, overlap,
++and seam validation before it can offer a useful gain.
++
++A simpler follow-up is to adapt model scale to motion using a small number of
++prewarmed feature/history sets and hysteresis. Recreating a single feature every
++time motion changes would introduce stalls and history loss. Keep this disabled
++until the fixed-scale quality/performance comparison is accepted.

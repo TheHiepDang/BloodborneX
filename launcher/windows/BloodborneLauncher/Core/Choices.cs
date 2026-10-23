@@ -182,6 +182,10 @@
             new("2160p", "2160"),
         };
 
+        public static Choice[] DlssNrInputs(int outputHeight) => DlssNrHeights
+            .Where(c => c.Value == "0" || int.Parse(c.Value) <= outputHeight)
+            .ToArray();
+
         /// <summary>What opens the port's in-game settings menu (BB_OVERLAY_KEYS).</summary>
         public static readonly Choice[] OverlayKeys =
         {

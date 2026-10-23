@@ -52,11 +52,18 @@ namespace BloodborneLauncher.Views
             IniToggle(SymbolRegular.BrainCircuit24, L.T("Enable neural rendering"),
                 L.T("Experimental feature 18 pass before DLSS SR/DLAA. Windows and NVIDIA RTX only; off by default"),
                 "dlss_nr", changed: UpdateUpscaler);
-            IniCombo(SymbolRegular.ResizeLarge24, L.T("Neural rendering input height"),
+            var nrPerformance = new CheckBox
+            {
+                Content = L.T("Performance"), IsChecked = Ini.NrPerformance,
+                Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            };
+            ToolTip.SetTip(nrPerformance, L.T("Use optimized neural rendering at the selected input height"));
+            nrPerformance.IsCheckedChanged += (_, _) => { Ini.NrPerformance = nrPerformance.IsChecked == true; Ws.SaveSoon(); };
+            ComboRow(SymbolRegular.ResizeLarge24, L.T("NR input height"),
                 L.T("Overrides the DLSS quality input size. Native AA/DLAA remains at output resolution"),
-                Choices.DlssNrHeights.Where(c => c.Value == "0" ||
-                    int.Parse(c.Value) <= Choices.OutputSize(Ini.Get("output_res", "1920x1080")).H).ToArray(),
-                "dlss_nr_height", changed: UpdateUpscaler);
+                Choices.DlssNrInputs(Choices.OutputSize(Ini.Get("output_res", "1920x1080")).H),
+                () => Ini.Get("dlss_nr_height", "720"), v => Ini.Set("dlss_nr_height", v),
+                width: 180, changed: UpdateUpscaler, accessory: nrPerformance);
             var nrAdvanced = Advanced(L.T("Neural rendering tuning"));
             IniSlider(SymbolRegular.SlideSize24, L.T("Intensity"), 0, 2, "dlss_nr_intensity", nrAdvanced);
             var nrPassSections = new List<Panel>();

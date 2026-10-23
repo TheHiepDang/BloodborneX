@@ -64,11 +64,20 @@ namespace BloodborneLauncher.Views
             ToggleRow(SymbolRegular.BrainCircuit24, L.T("Enable neural rendering"),
                 L.T("Experimental feature 18 pass before DLSS SR/DLAA. Windows and NVIDIA RTX only; off by default"),
                 () => Ini.Get("dlss_nr", "0") == "1", v => Ini.Set("dlss_nr", v ? "1" : "0"), dlssMore);
-            IniCombo(SymbolRegular.ResizeLarge24, L.T("Neural rendering input height"),
+            var nrPerformance = new System.Windows.Controls.CheckBox
+            {
+                Content = L.T("Performance"), IsChecked = Ini.NrPerformance,
+                Margin = new System.Windows.Thickness(12, 0, 0, 0),
+                VerticalAlignment = System.Windows.VerticalAlignment.Center,
+                ToolTip = L.T("Use optimized neural rendering at the selected input height"),
+            };
+            nrPerformance.Checked += (_, _) => { Ini.NrPerformance = true; Ws.SaveSoon(); };
+            nrPerformance.Unchecked += (_, _) => { Ini.NrPerformance = false; Ws.SaveSoon(); };
+            ComboRow(SymbolRegular.ResizeLarge24, L.T("NR input height"),
                 L.T("Overrides the DLSS quality input size. Native AA/DLAA remains at output resolution"),
-                Choices.DlssNrHeights.Where(c => c.Value == "0" ||
-                    int.Parse(c.Value) <= Choices.OutputSize(Ini.Get("output_res", "1920x1080")).H).ToArray(),
-                "dlss_nr_height", dlssMore);
+                Choices.DlssNrInputs(Choices.OutputSize(Ini.Get("output_res", "1920x1080")).H),
+                () => Ini.Get("dlss_nr_height", "720"), v => Ini.Set("dlss_nr_height", v),
+                dlssMore, width: 180, accessory: nrPerformance);
             IniSlider(SymbolRegular.SlideSize24, L.T("NR intensity"), 0, 2, "dlss_nr_intensity", dlssMore);
             var nrPassSections = new List<Panel>();
             void UpdateNrPassSections()
