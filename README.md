@@ -1,29 +1,20 @@
-# Lantern Engine
-<a href="https://trendshift.io/repositories/302591?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-302591" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/302591/daily?language=C%23" alt="Awakenchan%2FBloodBorneButPc | Trendshift" width="250" height="55"/></a>
+# BloodborneX
 
-Lantern Engine runs your own copy of Bloodborne on Windows and Linux: a launcher and my engine, built on bbport and shadPS4 and reworked by me for performance. The game's own code runs natively on your CPU; its graphics are translated to Vulkan.
-
-> **Note:** I'm keeping this going on my own, and updates are slower now because of the hate I've been getting. I'll keep working on it when I can.
+BloodborneX is a direct fork of [Awakenchan's Lantern Engine](https://github.com/Awakenchan/LanternEngine), adding experimental native Vulkan DLSS Neural Rendering on Windows. The original launcher and engine work are by Awakenchan and the upstream contributors.
 
 **No game files are included.** You need your own decrypted Bloodborne dump (CUSA03173) with update 1.09.
 
 ## Install
 
-1. Download `LanternEngine-<version>-win64.zip` from [Releases](https://github.com/Awakenchan/LanternEngine/releases) and extract it anywhere.
-2. Run `Lantern Engine.exe` and pick your game folder (the one with `eboot.bin`).
-3. Press **Play**. The launcher updates itself. `Bloodborne.exe` starts the game directly (add it to Steam as a non-Steam game).
-
-### Linux (beta)
-
-1. Download `LanternEngine-<version>-linux-x64.tar.gz` from [Releases](https://github.com/Awakenchan/LanternEngine/releases) and unpack it (`tar xzf LanternEngine-*-linux-x64.tar.gz`).
-2. Run `Lantern Engine` in the unpacked folder, pick your game folder and press **Play**. From a terminal: `./lantern.sh /path/to/CUSA03173`.
-3. It needs a Vulkan driver (Mesa or NVIDIA), Python 3 and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Arch, SteamOS 3.6, Bazzite). DLSS is Windows only for now, and the launcher does not update itself on Linux yet.
+1. Download the Windows package from the [latest release](https://github.com/TheHiepDang/BloodborneX/releases/tag/release) and unzip it.
+2. Supply your own `nvngx_dlssnr.dll` in the extracted `dlss/` folder. This unofficial NVIDIA runtime is **not included**.
+3. Run `Lantern Engine.exe`, select your game folder, and press **Play**. Enable Neural Rendering in the DLSS settings (Insert or L3 + R3).
 
 ## Credits
 
 | | |
 |---|---|
-| **Lantern Engine** | by **Awaken**: the launcher, and the engine reworked from its starting point (native shader compiler, direct draw calls, draw pipeline and memory performance work, PC menus and controls, upscaler integration, online through The Hunter's Dream, fixes) |
+| **Lantern Engine** | [**Awakenchan**](https://github.com/Awakenchan/LanternEngine): original launcher, engine development and performance work |
 | Engine starting point | [DarkIzuku/bloodborne_pc](https://github.com/DarkIzuku/bloodborne_pc) (built on [bbport](https://github.com/deadinside28/bloodborne_pc) and [shadPS4](https://github.com/shadps4-emu/shadPS4)) |
 | VRAM cleanup and frame pacing | adapted from [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) |
 | Crash and controller fixes | adapted from [AwesomeObserver](https://github.com/AwesomeObserver/bloodborne_pc), [Supermedo](https://github.com/Supermedo/bloodborne_pc) and [deadinside28](https://github.com/deadinside28/bloodborne_pc) |
