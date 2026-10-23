@@ -10,6 +10,10 @@ BloodborneX is a direct fork of [Awakenchan's Lantern Engine](https://github.com
 2. Supply your own `nvngx_dlssnr.dll` in the extracted `dlss/` folder. This unofficial NVIDIA runtime is **not included**.
 3. Run `Lantern Engine.exe`, select your game folder, and press **Play**. Enable Neural Rendering in the DLSS settings (Insert or L3 + R3).
 
+## Video showcase
+
+[![Watch the video](https://img.youtube.com/vi/E719AZr_Za4/hqdefault.jpg)](https://www.youtube.com/watch?v=E719AZr_Za4)
+
 ## Credits
 
 | | |
