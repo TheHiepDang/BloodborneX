@@ -26,6 +26,10 @@ $stage = "$dist\stage-$Version\BloodbornePC"
 if (Test-Path $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -Confirm:$false }
 robocopy $pkg $stage /E /XF 'Build Launcher.exe' 'Build Launcher.exe.old' 'Force Rebuild Launcher.cmd' build-stamp.json bbport.ini.bak `
     /XD user logs mods network engine-assets __pycache__ /NFL /NDL /NJH /NJS /NP | Out-Null
+# The NR model is user-supplied and must never be redistributed, even if a
+# developer's working package contains it. Strip only that exact filename from staging.
+Get-ChildItem -LiteralPath $stage -Recurse -File -Filter 'nvngx_dlssnr.dll' |
+    Remove-Item -Force -Confirm:$false
 # out\ is also where every game start writes files generated from the player's dump
 # (boot*.bin, eboot.elf, *.json): only the engine's programs and DLLs ship.
 Get-ChildItem "$stage\out" -File | Where-Object { $_.Extension -notin '.exe', '.dll', '.ico' } | Remove-Item -Force -Confirm:$false
@@ -57,7 +61,7 @@ if (Test-Path $zip) { Remove-Item -LiteralPath $zip -Force -Confirm:$false }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [IO.Compression.CompressionLevel]::Optimal, $true)
 $check = [IO.Compression.ZipFile]::OpenRead($zip)
-$bad = @($check.Entries | Where-Object { $_.FullName -match '[\\/]out[\\/].+\.(bin|elf|json|txt)$|eboot|[\\/]user[\\/]|\.(orig|bak|old)$|build-stamp|Build Launcher' })
+$bad = @($check.Entries | Where-Object { $_.FullName -match '[\\/]out[\\/].+\.(bin|elf|json|txt)$|eboot|[\\/]user[\\/]|\.(orig|bak|old)$|build-stamp|Build Launcher|(^|[\\/])nvngx_dlssnr\.dll$' })
 $check.Dispose()
 if ($bad.Count) { Remove-Item -LiteralPath $zip -Force -Confirm:$false; throw "Refusing to ship: $($bad.Count) game-derived or dev files, e.g. $($bad[0].FullName)" }
 "package: {0} ({1:N0} MB)" -f (Split-Path $zip -Leaf), ((Get-Item $zip).Length / 1MB)

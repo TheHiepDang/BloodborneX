@@ -22,7 +22,7 @@ namespace BloodborneLauncher.Core
     /// </summary>
     public static class Updater
     {
-        public const string Repository = "Awakenchan/LanternEngine";
+        public const string Repository = "TheHiepDang/BloodborneX";
         public static string ReleasesPage => $"https://github.com/{Repository}/releases";
 
         /// <summary>The engine build this launcher is made for (package.json "engine").</summary>
@@ -32,6 +32,10 @@ namespace BloodborneLauncher.Core
         /// <summary>The launcher's name before 0.9.34 beta 8 (now a forwarder to ExeName).</summary>
         public const string OldExeName = "Bloodborne Launcher.exe";
         private const string PackageFile = "package.json";
+
+        // NR candidates accept only complete packages from this fork's matching update family.
+        public static bool IsLocalBuild => File.Exists(Path.Combine(AppContext.BaseDirectory, "LOCAL-NR-RELEASE"));
+        public const string UpdateFamily = "bloodbornex-native-nr-v1";
 
         /// <summary>Files and folders of the player's that a package update never touches.</summary>
         private static readonly string[] Kept = { "lantern.ini", "bbport.ini", "mods.json", "patches.json", "user", "mods", "logs", "network", "engine-assets" };
@@ -60,7 +64,9 @@ namespace BloodborneLauncher.Core
                 : 0;
 
         /// <summary>This build as players see it: "v0.9.6" or "v0.9.7 beta 2".</summary>
-        public static string CurrentLabel => Label(Current, CurrentBeta);
+        public static string CurrentLabel => IsLocalBuild
+            ? $"v{Current} NR RC{Math.Max(1, CurrentBeta / 100)}"
+            : Label(Current, CurrentBeta);
 
         /// <summary>The channel the player chose; until they choose, a beta build stays on beta.</summary>
         public static bool BetaChannel(LauncherSettings s) => s.Str("update_channel") switch
@@ -104,7 +110,7 @@ namespace BloodborneLauncher.Core
         }
 
         /// <summary>The package needs the engine this launcher is made for.</summary>
-        public static bool EngineOutdated => OwnPackage != null && LocalEngine() != EngineId;
+        public static bool EngineOutdated => !IsLocalBuild && OwnPackage != null && LocalEngine() != EngineId;
 
         /// <summary>The latest release on the channel, or null when there is none (or no network).
         /// Stable: GitHub's latest release. Beta: the newest of all releases, pre-releases included.</summary>
@@ -119,13 +125,16 @@ namespace BloodborneLauncher.Core
             response.EnsureSuccessStatusCode();
             using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             if (!beta)
-                return Parse(doc.RootElement);
+            {
+                var stable = Parse(doc.RootElement);
+                return stable != null && await CompatibleAsync(stable) ? stable : null;
+            }
 
             Release? newest = null;
             foreach (var item in doc.RootElement.EnumerateArray())
             {
                 if (item.TryGetProperty("draft", out var draft) && draft.GetBoolean()) continue;
-                if (Parse(item) is { } release && (newest == null || release.IsNewerThan(newest.Version, newest.Beta)))
+                if (Parse(item) is { } release && (newest == null || release.IsNewerThan(newest.Version, newest.Beta)) && await CompatibleAsync(release))
                     newest = release;
             }
             return newest;
@@ -142,7 +151,7 @@ namespace BloodborneLauncher.Core
             foreach (var item in doc.RootElement.EnumerateArray())
             {
                 if (item.TryGetProperty("draft", out var draft) && draft.GetBoolean()) continue;
-                if (Parse(item) is { } release && (release.ZipUrl != null || release.ExeUrl != null))
+                if (Parse(item) is { } release && (release.ZipUrl != null || release.ExeUrl != null) && await CompatibleAsync(release))
                     all.Add(release);
             }
             all.Sort((a, b) => Compare(b.Version, b.Beta, a.Version, a.Beta));
@@ -153,6 +162,7 @@ namespace BloodborneLauncher.Core
         /// from this one's, or it does not say which engine it has (older releases).</summary>
         public static async Task<bool> SwitchNeedsPackageAsync(Release release)
         {
+            if (IsLocalBuild) return true;
             if (OwnPackage == null || release.ZipUrl == null) return false;
             if (release.ExeUrl == null) return true;
             var remote = await RemoteEngineAsync(release);
@@ -178,7 +188,9 @@ namespace BloodborneLauncher.Core
                 if (spaced.Equals(ExeName, StringComparison.OrdinalIgnoreCase) ||
                     (exe == null && spaced.Equals(OldExeName, StringComparison.OrdinalIgnoreCase)))
                     (exe, exeSize) = (url, size);
-                else if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && zip == null)
+                else if ((name.StartsWith("LanternEngine-", StringComparison.OrdinalIgnoreCase) ||
+                          name.StartsWith("BloodbornePC-", StringComparison.OrdinalIgnoreCase)) &&
+                         name.EndsWith("-win64.zip", StringComparison.OrdinalIgnoreCase) && zip == null)
                     (zip, zipSize) = (url, size);
                 else if (name.Equals(PackageFile, StringComparison.OrdinalIgnoreCase))
                     package = url;
@@ -201,11 +213,17 @@ namespace BloodborneLauncher.Core
             if (plus > 0) text = text[..plus];
             beta = 0;
             var marker = text.IndexOf("-beta", StringComparison.OrdinalIgnoreCase);
+            var markerLength = 5;
+            if (marker < 0)
+            {
+                marker = text.IndexOf("-nr.rc", StringComparison.OrdinalIgnoreCase);
+                markerLength = 6;
+            }
             if (marker > 0)
             {
                 // "beta.9" and "beta.9.1" (a small update to beta 9): kept as 900 and 901, so 9 <
                 // 9.1 < 10. Launchers before 9.1 read "9.1" as 91, which is newer too: they update.
-                var parts = text[(marker + 5)..].TrimStart('.', '-', ' ').Split('.', '-', ' ', '+');
+                var parts = text[(marker + markerLength)..].TrimStart('.', '-', ' ').Split('.', '-', ' ', '+');
                 var major = parts.Length > 0 && int.TryParse(parts[0], out var a) && a > 0 ? a : 1;
                 var minor = parts.Length > 1 && int.TryParse(parts[1], out var b) && b is > 0 and < 100 ? b : 0;
                 beta = major * 100 + minor;
@@ -220,6 +238,23 @@ namespace BloodborneLauncher.Core
             version = new Version(0, 0, 0);
             return false;
         }
+
+        /// <summary>Fail closed for NR builds: metadata must explicitly name this integration family.</summary>
+        private static async Task<bool> CompatibleAsync(Release release)
+        {
+            if (!IsLocalBuild) return true;
+            if (release.ZipUrl == null || release.PackageUrl == null) return false;
+            try
+            {
+                using var http = Client(TimeSpan.FromSeconds(10));
+                return NrMetadataCompatible(JsonNode.Parse(await http.GetStringAsync(release.PackageUrl)) as JsonObject);
+            }
+            catch { return false; }
+        }
+
+        internal static bool NrMetadataCompatible(JsonObject? metadata) => metadata != null &&
+            (string?)metadata["update_family"] == UpdateFamily &&
+            ((string?)metadata["engine"])?.StartsWith("lantern-native-nr-", StringComparison.Ordinal) == true;
 
         /// <summary>The engine build the release's package has, or null when it does not say.</summary>
         public static async Task<string?> RemoteEngineAsync(Release release)
@@ -239,6 +274,7 @@ namespace BloodborneLauncher.Core
         /// <summary>Whether this update has to replace the whole package (a new engine).</summary>
         public static async Task<bool> NeedsPackageAsync(Release release)
         {
+            if (IsLocalBuild) return true;
             if (OwnPackage == null || release.ZipUrl == null) return false;
             var remote = await RemoteEngineAsync(release);
             return remote != null ? remote != LocalEngine() : LocalEngine() == null && release.ExeUrl == null;
@@ -249,6 +285,8 @@ namespace BloodborneLauncher.Core
         /// optional ones: see <see cref="Optional"/>).</summary>
         public static async Task<IReadOnlyList<string>> InstallAsync(Release release, bool package, IProgress<double>? progress = null)
         {
+            if (IsLocalBuild && (!package || !await CompatibleAsync(release)))
+                throw new InvalidOperationException("This NR build accepts only complete compatible BloodborneX NR packages, not launcher-only or upstream replacements.");
             var self = Environment.ProcessPath ?? throw new InvalidOperationException("Cannot tell where this launcher is.");
             var folder = Path.GetDirectoryName(self)!;
             // A folder of its own each time: one an antivirus still holds a file in (from an earlier

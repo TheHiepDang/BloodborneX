@@ -72,7 +72,7 @@ namespace BloodborneLauncher.Views
                             EngineSwitches.Set(S, item, EngineSwitches.Format(item, v));
                             ShowChanged();
                         },
-                        format, valueWidth: item.Unit.Length > 0 ? 86 : 52);
+                        format, valueWidth: item.Unit.Length > 0 ? 86 : 52, defaultValue: EngineSwitches.DefaultNumber(item));
                     _resets.Add(() => slider.Value = EngineSwitches.DefaultNumber(item));
                     break;
                 }

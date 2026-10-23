@@ -7,7 +7,7 @@ namespace BloodborneLauncher.Views
     /// <summary>Upscaling and the game's own effects (patches applied at start).</summary>
     public sealed class GraphicsPage : LauncherPage
     {
-        private readonly TextBlock _upscalerHint, _dlssHint;
+        private readonly TextBlock _upscalerHint, _dlssHint, _dlssNrHint;
         private TextBlock? _motionBlurHint;
         private readonly SettingRow _presetCard, _sharpenCard, _sharpnessCard;
         private readonly Control _enginePreset;
@@ -37,7 +37,7 @@ namespace BloodborneLauncher.Views
             IniToggle(SymbolRegular.Eyedropper24, L.T("Sharpening (RCAS)"), L.T("Works with every option above, TAA included: turn it up if the picture looks soft"), "sharpen");
             _sharpenCard = (SettingRow)Body.Children[^1];
             SliderRow(SymbolRegular.SlideSize24, L.T("Sharpening strength"), L.T("Up to 1: the upscaler's own sharpening. Above 1: an extra pass"), 0, 2, 0.05,
-                () => ParseDouble(Ini.Get("sharpness"), 0.5), v => Ini.Set("sharpness", Fmt(v)));
+                () => ParseDouble(Ini.Get("sharpness"), 0.5), v => Ini.Set("sharpness", Fmt(v)), defaultValue: 0.5);
             _sharpnessCard = (SettingRow)Body.Children[^1];
 
             IniCombo(SymbolRegular.FastForward24, L.T("Frame generation"),
@@ -48,6 +48,59 @@ namespace BloodborneLauncher.Views
 
             IniCombo(SymbolRegular.BrainCircuit24, L.T("DLSS model"),
                 L.T("Which NVIDIA model DLSS runs. Applied on the next launch"), Choices.DlssModels, "dlss_preset");
+            Group(L.T("DLSS Neural Rendering"));
+            IniToggle(SymbolRegular.BrainCircuit24, L.T("Enable neural rendering"),
+                L.T("Experimental feature 18 pass before DLSS SR/DLAA. Windows and NVIDIA RTX only; off by default"),
+                "dlss_nr", changed: UpdateUpscaler);
+            IniCombo(SymbolRegular.ResizeLarge24, L.T("Neural rendering input height"),
+                L.T("Overrides the DLSS quality input size. Native AA/DLAA remains at output resolution"),
+                Choices.DlssNrHeights.Where(c => c.Value == "0" ||
+                    int.Parse(c.Value) <= Choices.OutputSize(Ini.Get("output_res", "1920x1080")).H).ToArray(),
+                "dlss_nr_height", changed: UpdateUpscaler);
+            var nrAdvanced = Advanced(L.T("Neural rendering tuning"));
+            IniSlider(SymbolRegular.SlideSize24, L.T("Intensity"), 0, 2, "dlss_nr_intensity", nrAdvanced);
+            var nrPassSections = new List<Panel>();
+            void UpdateNrPassSections()
+            {
+                var count = int.TryParse(Ini.Get("dlss_nr_passes", "1"), out var n) ? Math.Clamp(n, 1, 3) : 1;
+                for (var p = 0; p < nrPassSections.Count; p++)
+                    nrPassSections[p].IsVisible = Ini.Flag("dlss_nr_customize_passes") && count >= p + 2;
+            }
+            IniCombo(SymbolRegular.Options24, L.T("NR passes"),
+                L.T("Chained models with independent histories. More passes cost GPU time and memory; changing this rebuilds the model"),
+                Choices.DlssNrPasses, "dlss_nr_passes", nrAdvanced, changed: UpdateNrPassSections);
+            IniToggle(SymbolRegular.Options24, L.T("Customize extra passes"),
+                L.T("Off: extra passes inherit the main parameters. On: each enabled extra pass uses its own saved parameters. White point is shared"),
+                "dlss_nr_customize_passes", nrAdvanced, changed: UpdateNrPassSections);
+            IniCombo(SymbolRegular.Options24, L.T("NR preset"),
+                L.T("Undocumented model hint, not strength. Presets may produce similar results"), Choices.DlssNrPresets,
+                "dlss_nr_preset", nrAdvanced);
+            IniCombo(SymbolRegular.Options24, L.T("NR style"),
+                L.T("Three community-tested styles; names are not NVIDIA metadata"), Choices.DlssNrStyles,
+                "dlss_nr_style", nrAdvanced);
+            IniSlider(SymbolRegular.Shapes24, L.T("Local structure"), 0, 2, "dlss_nr_local_structure", nrAdvanced);
+            IniSlider(SymbolRegular.Color24, L.T("Local tone"), 0, 2, "dlss_nr_local_tone", nrAdvanced);
+            IniSlider(SymbolRegular.Shapes24, L.T("Skin structure"), -1, 2, "dlss_nr_skin_structure", nrAdvanced, fallback: -1);
+            IniToggle(SymbolRegular.Eye24, L.T("Automatic mask"), null, "dlss_nr_auto_mask", nrAdvanced);
+            IniSlider(SymbolRegular.BrightnessHigh24, L.T("White point (all passes)"), 0.125, 8, "dlss_nr_white_point", nrAdvanced,
+                step: 0.025, fallback: 0.125);
+            for (var pass = 2; pass <= 3; pass++)
+            {
+                var section = new StackPanel(); nrPassSections.Add(section); nrAdvanced.Children.Add(section);
+                section.Children.Add(new TextBlock { Text = L.F($"NR pass {pass} parameters"), FontSize = 15,
+                    Margin = new Thickness(12, 10, 0, 4) });
+                var prefix = $"dlss_nr_pass{pass}_";
+                IniCombo(SymbolRegular.Options24, L.T("NR style"),
+                    L.T("Use main style preserves the main choice; Standard, Natural and Cinematic override only this pass"),
+                    new[] { new Choice(L.T("Use main style"), "-1") }.Concat(Choices.DlssNrStyles).ToArray(),
+                    prefix + "style", section);
+                IniSlider(SymbolRegular.SlideSize24, L.T("Intensity"), 0, 2, prefix + "intensity", section);
+                IniSlider(SymbolRegular.Shapes24, L.T("Local structure"), 0, 2, prefix + "local_structure", section);
+                IniSlider(SymbolRegular.Color24, L.T("Local tone"), 0, 2, prefix + "local_tone", section);
+                IniSlider(SymbolRegular.Shapes24, L.T("Skin structure"), -1, 2, prefix + "skin_structure", section, fallback: -1);
+            }
+            UpdateNrPassSections();
+            Add(Card(SymbolRegular.ShieldCheckmark24, L.T("Neural runtime"), "", null, out _dlssNrHint));
             IniToggle(SymbolRegular.ArrowMove24, L.T("Object motion vectors"), L.T("Less ghosting on characters; costs about 10% FPS"), "object_motion");
             IniToggle(SymbolRegular.DataUsage24, L.T("Show FPS"), null, "show_fps");
             // The FPS counter's look (live in game too: Insert or L3 + R3 › Other).
@@ -184,7 +237,10 @@ namespace BloodborneLauncher.Views
 
         private void IniSlider(SymbolRegular icon, string title, double min, double max, string key, Panel? into = null,
             double step = 0.05, double fallback = 1.0) =>
-            SliderRow(icon, title, null, min, max, step, () => ParseDouble(Ini.Get(key, Fmt(fallback)), fallback), v => Ini.Set(key, Fmt(v)), into: into);
+            SliderRow(icon, title, null, min, max, step,
+                () => ParseDouble(Ini.Get(key, fallback.ToString(System.Globalization.CultureInfo.InvariantCulture)), fallback),
+                v => Ini.Set(key, v.ToString(key == "dlss_nr_white_point" ? "0.000" : "0.00", System.Globalization.CultureInfo.InvariantCulture)),
+                format: key == "dlss_nr_white_point" ? "0.000" : "0.00", into: into, defaultValue: fallback);
 
         /// <summary>A switch the engine preset sets: changing it by hand shows the preset it now matches.</summary>
         private void Feature(SymbolRegular icon, string title, string hint, string key, Panel into) =>
@@ -258,6 +314,7 @@ namespace BloodborneLauncher.Views
             SetHint(_dlssHint, DlssFound()
                 ? L.F($"NVIDIA DLSS {System.Diagnostics.FileVersionInfo.GetVersionInfo(ngx).FileVersion} is included (out\\nvngx_dlss.dll). Choose it as the upscaler above")
                 : L.T("out\\nvngx_dlss.dll is missing from the engine folder"));
+            SetHint(_dlssNrHint, DlssNrRuntime.Status());
         }
 
         /// <summary>The fsr4vk provider the package ships (FSR 4.1.1 on any GPU, vk_fsr4vk.cpp).</summary>

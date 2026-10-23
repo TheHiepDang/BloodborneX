@@ -119,6 +119,8 @@ namespace BloodborneLauncher.Core
                 ["BB_PREBUILT"] = "1",
                 ["BB_DATA_DIR"] = Paths.DataDir,
                 ["BB_CONFIG"] = Paths.IniPath,
+                // Use the same user-supplied runtime location shown by launcher validation.
+                ["BB_DLSS_DIR"] = Path.GetDirectoryName(DlssNrRuntime.PathName)!,
                 ["BB_GAME_DIR"] = GameDir(s),
                 ["BB_USER_DIR"] = UserDir(s),
                 ["BB_MODS_DIR"] = ModsDir(s),

@@ -646,7 +646,8 @@ namespace BloodborneLauncher.Views
         /// away) to set it exactly. The value is kept in the slider's range and on its steps; text that
         /// is not a number puts the current value back. Every slider in the launcher is made here.</summary>
         protected Slider SliderRow(SymbolRegular icon, string title, string? hint, double min, double max, double step,
-            Func<double> get, Action<double> set, string format = "0.00", Panel? into = null, double valueWidth = 44)
+            Func<double> get, Action<double> set, string format = "0.00", Panel? into = null, double valueWidth = 44,
+            double defaultValue = 1.0)
         {
             var slider = new Slider
             {
@@ -703,7 +704,15 @@ namespace BloodborneLauncher.Views
                 set(slider.Value);
                 Ws.SaveSoon();
             };
-            Add(Card(icon, title, hint, Row(slider, value), out _), into);
+            var reset = IconButton(SymbolRegular.ArrowReset24,
+                L.F($"Reset to default: {defaultValue.ToString(format, culture)}"), (_, _) =>
+                {
+                    slider.Value = Math.Clamp(defaultValue, min, max);
+                    Show();
+                    set(slider.Value);
+                    Ws.SaveSoon();
+                });
+            Add(Card(icon, title, hint, Row(slider, value, reset), out _), into);
             return slider;
         }
 

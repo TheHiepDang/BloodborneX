@@ -59,7 +59,7 @@ namespace BloodborneLauncher.Views
                 L.T("With a menu open in the world, the movement and look keys stay your character's and the arrow keys move through the menu. The mouse turns the camera while Mouse in menus is off. Whether the character can walk then is up to the game. Applied at the next start"),
                 () => Ini.Get("menu_move", "0") == "1", v => Ini.Set("menu_move", v ? "1" : "0"), mouse);
             SliderRow(SymbolRegular.Gauge24, L.T("Mouse sensitivity"), L.T("5 is the default"), 0, 10, 1,
-                () => ParseDouble(Ini.Get("mouse_sensitivity", "5"), 5), v => Ini.Set("mouse_sensitivity", ((int)v).ToString()), "0", mouse);
+                () => ParseDouble(Ini.Get("mouse_sensitivity", "5"), 5), v => Ini.Set("mouse_sensitivity", ((int)v).ToString()), "0", mouse, defaultValue: 5);
             IniToggle(SymbolRegular.ArrowSwap24, L.T("Invert horizontal"), null, "mouse_invert_x", mouse);
             IniToggle(SymbolRegular.ArrowSortDown24, L.T("Invert vertical"), null, "mouse_invert_y", mouse);
             IniToggle(SymbolRegular.ArrowRotateClockwise24, L.T("Camera auto-rotation"), L.T("Let the camera turn by itself with movement, as with a gamepad"),
@@ -104,7 +104,7 @@ namespace BloodborneLauncher.Views
             SliderRow(SymbolRegular.CircleSmall24, L.T("Stick dead zone"),
                 L.T("Ignores small stick movement, for sticks that drift. 0 = off (the game's own)"), 0, 30, 1,
                 () => double.TryParse(Ini.Get("pad_deadzone", "0"), out var v) ? v : 0,
-                v => Ini.Set("pad_deadzone", ((int)Math.Round(v)).ToString()), format: "0'%'");
+                v => Ini.Set("pad_deadzone", ((int)Math.Round(v)).ToString()), format: "0'%'", defaultValue: 0);
 
             // ==================== Bindings ====================
             var header = new Grid { Margin = new Thickness(2, 24, 0, 8), ColumnDefinitions = new ColumnDefinitions("*,Auto") };
