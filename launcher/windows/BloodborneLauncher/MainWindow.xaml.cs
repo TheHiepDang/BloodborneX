@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.Windows;
+using System.IO;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -32,6 +33,15 @@ namespace BloodborneLauncher
             ws.GameCrashed += OnGameCrashed;
             ws.SignInRefused += OnSignInRefused;
             ws.Initialise();
+            try
+            {
+                if (StreamlineRuntime.RetireExtraPlugins(Paths.BinariesDir) is { } backup)
+                    ws.Log(L.F($"Older Streamline plugins were backed up to {backup}"), LogLevel.Step);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                ws.Log(L.F($"Could not retire older Streamline plugins: {e.Message}"), LogLevel.Warn);
+            }
             KeyDown += Window_KeyDown;
             PreviewMouseDown += Window_PreviewMouseDown;
             Deactivated += (_, _) => SearchResults.Visibility = Visibility.Collapsed;

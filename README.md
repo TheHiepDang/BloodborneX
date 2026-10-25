@@ -8,7 +8,7 @@ BloodborneX builds on [Awakenchan's Lantern Engine](https://github.com/Awakencha
 
 1. Download the Windows package from the [latest release](https://github.com/TheHiepDang/BloodborneX/releases/latest) and unzip it.
 2. If using Neural Rendering, supply your own runtime at **`dlss/nvngx_dlssnr.dll`**. Choose the unmodified October 16 DLL for **GeForce RTX 50-series**, or the **openNR FP16 compatibility** DLL for other RTX cards. Install one DLL directly in `dlss/`; the engine detects the GPU for runtime handling. The DLL is **not included**. See [accepted builds and hashes](docs/NR-RELEASE.md).
-3. If testing DLSS Frame Generation, run `Install Streamline.cmd` in the extracted package. It downloads and verifies the complete NVIDIA Streamline 2.14.16 runtime. See the [HDR test instructions](docs/DLSS-FG-HDR-PRERELEASE.md).
+3. DLSS Frame Generation's matched NVIDIA Streamline 2.14.16 runtime is included in the Windows package. Select it in Graphics if you have a supported RTX GPU. See the [HDR test instructions](docs/DLSS-FG-HDR-PRERELEASE.md).
 4. Run `Lantern Engine.exe`, select your game folder, and press **Play**. Enable Neural Rendering or DLSS Frame Generation in the graphics settings as desired.
 
 See [release notes](docs/NR-RELEASE.md) for requirements and limitations, or the [development handoff](docs/DLSSNR-HANDOFF.md) for technical context.

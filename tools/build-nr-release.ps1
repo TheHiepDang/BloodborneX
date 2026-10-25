@@ -92,6 +92,13 @@ try {
     Copy-One (Join-Path $PSScriptRoot 'nr-release-default.ini') (Join-Path $package 'engine\lantern.default.ini')
     Copy-One (Join-Path $PSScriptRoot 'Install Streamline.cmd') (Join-Path $package 'Install Streamline.cmd')
     Copy-One (Join-Path $PSScriptRoot 'install-streamline.ps1') (Join-Path $package 'tools\Install Streamline.ps1')
+    # Ship the signed production runtime with the package so an updater install is
+    # ready for DLSS-G without a separate user setup step. The installer extracts
+    # only the pinned files and writes their verified manifest.
+    $streamline = Download 'https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.14.16/streamline-sdk-v2.14.16.zip' `
+        'streamline-sdk-v2.14.16.zip' '32041E51DB0CAB709A271B72A352281B690C2ABBD669A827809401A5DD23956B'
+    & (Join-Path $PSScriptRoot 'install-streamline.ps1') -PackageRoot $package -SdkArchivePath $streamline
+    if (!$?) { throw 'Could not install the verified Streamline runtime into the package' }
     # Resolve the native dependency closure rather than assuming MSYS2 is installed on the player PC.
     $queue = [Collections.Generic.Queue[string]]::new()
     Get-ChildItem $package -Recurse -File | Where-Object Extension -In '.exe','.dll' | ForEach-Object { $queue.Enqueue($_.FullName) }
@@ -154,10 +161,10 @@ try {
         engine_upstream='https://github.com/DarkIzuku/bloodborne_pc'; engine_base='8ecba9a4abdd54747e31d7fee54982e422b5f8e2';
         engine_patch_sha256=(Get-FileHash (Join-Path $repo 'engine\bbhost-changes.patch')).Hash;
         supplemental_engine_patches=@($supplemental); applied_engine_snapshot='LanternEngine-source/engine-source';
-        fixes=@('FSR FG transient allocation retirement','RTX 50 original NR runtime selection','NR Performance model scaling','DLSS-G HDR presenter input','Complete Streamline runtime installer','Discord features removed');
+        fixes=@('FSR FG transient allocation retirement','RTX 50 original NR runtime selection','NR Performance model scaling','DLSS-G HDR presenter input','Complete Streamline runtime packaged','Discord features removed');
         tested_engine_outputs=$engineHashes; downloads=$script:downloads;
-        nr_runtime_included=$false; startup='bundled Python; native bb-start intentionally omitted';
-        optional_assets_omitted=@('Streamline binaries (install from pinned NVIDIA SDK with Install Streamline.cmd)','FSR4/FSR4.1.1','bbbridge online helper');
+        nr_runtime_included=$false; streamline_runtime_included=$true; startup='bundled Python; native bb-start intentionally omitted';
+        optional_assets_omitted=@('FSR4/FSR4.1.1','bbbridge online helper');
         toolchain=(& (Join-Path $bin 'clang.exe') --version | Select-Object -First 1)
     }
     $provenance | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $package 'BUILD-PROVENANCE.json') -Encoding utf8
@@ -216,14 +223,16 @@ snapshot is authoritative for this release. See BUILD-PROVENANCE.json.
 
 Build engine-source/build.sh with the documented MSYS2 CLANG64 dependencies.
 The launcher source is BloodborneX/launcher/windows. No game, NR runtime or
-Streamline binaries are included. The portable package has an installer that
-downloads a pinned NVIDIA Streamline SDK for users choosing DLSS-G.
+Streamline binaries are included in this source snapshot. The portable package
+contains the pinned NVIDIA Streamline runtime and its licence texts.
 Packaging scripts are in BloodborneX/tools.
 '@ | Set-Content -LiteralPath (Join-Path $source 'BUILD-FROM-SNAPSHOT.md') -Encoding utf8
     Copy-One (Join-Path $package 'BUILD-PROVENANCE.json') (Join-Path $source 'BUILD-PROVENANCE.json')
     # The only binaries allowed in the portable tree are explicitly built/copied above.
     $forbidden = Get-ChildItem $package,$source -Recurse -File | Where-Object {
-        $_.Name -match '^(nvngx_dlssnr\.dll|nvngx_dlssg\.dll|NvLowLatencyVk\.dll|sl\..*\.dll|eboot\..*|boot.*\.bin|prepared\.json|game_dir\.txt|msys-2\.0\.dll)$' -or
+        $_.Name -match '^(nvngx_dlssnr\.dll|eboot\..*|boot.*\.bin|prepared\.json|game_dir\.txt|msys-2\.0\.dll)$' -or
+        ($_.FullName.StartsWith($source+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -and
+         $_.Name -match '^(nvngx_dlssg\.dll|NvLowLatencyVk\.dll|sl\..*\.dll)$') -or
         $_.Extension -in '.pdb','.dmp','.log','.orig','.bak','.old'
     }
     if ($forbidden) { throw "Forbidden release content: $($forbidden[0].FullName)" }

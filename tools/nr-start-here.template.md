@@ -87,9 +87,10 @@ The release must attach its matching `package.json` separately; metadata inside 
   undocumented preset values can alias.
 - This candidate uses the NR-aware Python starter. Do not add `bb-start.exe` from
   an older/native build: its render-size preparation does not yet have NR parity.
-- Ordinary DLSS SR and built-in FSR 3 are included. Optional Streamline/DLSS-G,
-  FSR 4/4.1.1 assets and bbbridge online helper are not bundled in this candidate.
-  Do not expect those optional modes to work simply because the launcher lists them.
+- Ordinary DLSS SR, the matched Streamline/DLSS-G runtime, and built-in FSR 3 are
+  included. FSR 4/4.1.1 assets and the bbbridge online helper are not bundled.
+  DLSS-G is off by default and requires a supported RTX GPU. Its HDR path still
+  needs gameplay validation on an HDR display.
 - FSR 3.1 is the supported frame-generation path for this candidate. Per-frame
   descriptor and constant-buffer retention is fixed. A roughly five-minute NR+FG
   gameplay retest showed bounded memory; this is not all-scene/long-session coverage.

@@ -115,6 +115,15 @@ namespace BloodborneLauncher
             ws.GameCrashed += OnGameCrashed;
             ws.SignInRefused += OnSignInRefused;
             ws.Initialise();
+            try
+            {
+                if (OperatingSystem.IsWindows() && StreamlineRuntime.RetireExtraPlugins(Paths.BinariesDir) is { } backup)
+                    ws.Log(L.F($"Older Streamline plugins were backed up to {backup}"), LogLevel.Step);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                ws.Log(L.F($"Could not retire older Streamline plugins: {e.Message}"), LogLevel.Warn);
+            }
             AddHandler(KeyDownEvent, Window_KeyDown, RoutingStrategies.Bubble);
             AddHandler(PointerPressedEvent, Window_PointerPressed, RoutingStrategies.Tunnel, handledEventsToo: true);
             Deactivated += (_, _) => _searchResults.IsVisible = false;

@@ -33,7 +33,9 @@ try
     var extra = Path.Combine(dir, "sl.old.dll");
     File.WriteAllText(extra, "extra");
     Expect(StreamlineRuntime.Problem(dir)?.Contains("extra") == true, "extra plugin rejected");
-    File.Delete(extra);
+    var backup = StreamlineRuntime.RetireExtraPlugins(dir);
+    Expect(backup != null && !File.Exists(extra) && File.Exists(Path.Combine(backup, "sl.old.dll")) &&
+           StreamlineRuntime.Problem(dir) is null, "older plugin backed up after an in-place update");
     Manifest(new string('0', 64));
     Expect(StreamlineRuntime.Problem(dir)?.Contains("different SDK") == true, "wrong SDK rejected");
 }

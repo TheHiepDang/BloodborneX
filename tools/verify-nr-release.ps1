@@ -15,9 +15,22 @@ Check (($info.ProductVersion -split '\+')[0] -eq $Version -and ([version]$info.F
 Check ((Get-FileHash -LiteralPath (Join-Path $package 'engine\out\bb-probe.exe')).Hash -eq $ExpectedEngineHash) 'Package contains the engine compiled in this run'
 Check ((Get-Content -LiteralPath (Join-Path $package 'LOCAL-NR-RELEASE') -First 1) -eq $Version) 'NR marker matches the release version'
 Check ((Test-Path -LiteralPath (Join-Path $package 'Install Streamline.cmd') -PathType Leaf) -and
-       (Test-Path -LiteralPath (Join-Path $package 'tools\Install Streamline.ps1') -PathType Leaf)) 'Pinned Streamline installer is included'
-Check (@(Get-ChildItem -LiteralPath (Join-Path $package 'engine\out') -File |
-         Where-Object { $_.Name -match '^(sl\..*\.dll|nvngx_dlssg\.dll|NvLowLatencyVk\.dll)$' }).Count -eq 0) 'Proprietary Streamline runtime is installed by the user, not bundled'
+       (Test-Path -LiteralPath (Join-Path $package 'tools\Install Streamline.ps1') -PathType Leaf)) 'Streamline repair helper is included'
+$streamlineOut=Join-Path $package 'engine\out'
+$streamlineRecord=Get-Content -LiteralPath (Join-Path $streamlineOut 'streamline-runtime.json') -Raw | ConvertFrom-Json -AsHashtable
+$streamlineFiles=@('sl.interposer.dll','sl.common.dll','sl.dlss_g.dll','sl.reflex.dll','sl.pcl.dll',
+    'nvngx_dlssg.dll','NvLowLatencyVk.dll','nvngx_dlss.license.txt','reflex.license.txt','LICENSE-Streamline.txt')
+Check ($streamlineRecord.version -eq '2.14.16' -and
+       $streamlineRecord.sdk_sha256 -eq '32041E51DB0CAB709A271B72A352281B690C2ABBD669A827809401A5DD23956B' -and
+       $streamlineRecord.files.Count -eq $streamlineFiles.Count) 'Pinned Streamline SDK record is included'
+foreach ($name in $streamlineFiles) {
+    $file=Join-Path $streamlineOut $name
+    Check ((Test-Path -LiteralPath $file -PathType Leaf) -and
+           (Get-Item -LiteralPath $file).Length -gt 0 -and
+           (Get-FileHash -LiteralPath $file).Hash -eq $streamlineRecord.files[$name]) "Matched Streamline runtime file: $name"
+}
+Check (@(Get-ChildItem -LiteralPath $streamlineOut -File -Filter 'sl.*.dll' |
+         Where-Object { $_.Name -notin $streamlineFiles }).Count -eq 0) 'No extra Streamline plugin is packaged'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $expectedArchives=@("LanternEngine-$Version-win64.zip","LanternEngine-$Version-source.zip")
 $checksumLines=@(Get-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt'))
@@ -32,6 +45,9 @@ foreach ($name in $expectedArchives) {
     $zip=[IO.Compression.ZipFile]::OpenRead((Join-Path $root $name))
     try {
         $files=@($zip.Entries | Where-Object { !$_.FullName.EndsWith('/') })
+        if ($name.EndsWith('-source.zip') -and @($files | Where-Object {
+            $_.FullName -match '/(sl\.[^/]*\.dll|nvngx_dlssg\.dll|NvLowLatencyVk\.dll)$'
+        }).Count -gt 0) { throw 'Streamline binaries must not appear in the source snapshot' }
         $names=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         foreach ($entry in $files) {
             if (!$names.Add($entry.FullName)) { throw "Duplicate ZIP path: $($entry.FullName)" }

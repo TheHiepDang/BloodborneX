@@ -8,11 +8,12 @@ The script always runs native compilation, launcher compilation and checks. It r
 
 The finished files are in `releases/<version>/Upload`. Upload **every file from that folder together**. `UPLOAD-INSTRUCTIONS.txt` beside it records the exact tag and release type. The script does not upload, create a tag, push code, modify an installed game or change user settings.
 
-The Windows package includes `Install Streamline.cmd`, which downloads the pinned
-official NVIDIA Streamline 2.14.16 SDK when a tester chooses DLSS Frame Generation.
-Streamline binaries are not bundled. The package verifier checks that the helper is
-present and the proprietary runtime files are absent. The Discord release
-notification workflow has been removed from this fork.
+The builder downloads NVIDIA's pinned Streamline 2.14.16 SDK, verifies its archive
+hash, and packages the seven matched production DLLs with their licence texts and
+per-file manifest. DLSS Frame Generation needs no separate installation after a
+normal package update. `Install Streamline.cmd` remains as a repair helper. The
+package verifier checks the runtime set. The Discord release notification workflow
+has been removed from this fork.
 
 Requirements: Windows, PowerShell 7.4+, .NET SDK 8+, Git, and the existing MSYS2 CLANG64 engine build dependencies. It uses a temporary N: alias for native build paths and removes only that alias when done. `-BuildDrive` can select another unused drive; an existing native CMake cache must match the selected alias and source folder.
 

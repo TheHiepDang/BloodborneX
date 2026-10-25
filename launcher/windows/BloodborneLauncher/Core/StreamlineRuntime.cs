@@ -19,6 +19,26 @@ namespace BloodborneLauncher.Core
             "nvngx_dlss.license.txt", "reflex.license.txt", "LICENSE-Streamline.txt",
         };
 
+        /// <summary>
+        /// An older updater copies package files in place, so plugins from an earlier
+        /// Streamline installation can remain beside the new matched set. Keep those
+        /// plugins recoverable while preventing Streamline from loading a mixed set.
+        /// </summary>
+        public static string? RetireExtraPlugins(string directory)
+        {
+            if (!File.Exists(Path.Combine(directory, "streamline-runtime.json"))) return null;
+            var extras = Directory.GetFiles(directory, "sl.*.dll")
+                .Where(path => !Files.Contains(Path.GetFileName(path), StringComparer.OrdinalIgnoreCase))
+                .ToArray();
+            if (extras.Length == 0) return null;
+            var backup = Path.Combine(directory, "backups", "before-streamline-update-" +
+                DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(backup);
+            foreach (var path in extras)
+                File.Move(path, Path.Combine(backup, Path.GetFileName(path)));
+            return backup;
+        }
+
         /// <returns>Null only when every expected file matches the installer manifest.</returns>
         public static string? Problem(string directory)
         {
@@ -26,7 +46,7 @@ namespace BloodborneLauncher.Core
                 return "Engine folder is missing.";
             var manifestPath = Path.Combine(directory, "streamline-runtime.json");
             if (!File.Exists(manifestPath))
-                return "Run Install Streamline.cmd to install the complete runtime.";
+                return "The Streamline runtime is missing. Reinstall the current BloodborneX package.";
             try
             {
                 using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
@@ -34,31 +54,31 @@ namespace BloodborneLauncher.Core
                 if (root.GetProperty("version").GetString() != Version ||
                     !string.Equals(root.GetProperty("sdk_sha256").GetString(), SdkSha256,
                         StringComparison.OrdinalIgnoreCase))
-                    return "The Streamline runtime is from a different SDK. Run Install Streamline.cmd.";
+                    return "The Streamline runtime is from a different SDK. Reinstall the current BloodborneX package.";
                 var hashes = root.GetProperty("files");
                 foreach (var name in Files)
                 {
                     var path = Path.Combine(directory, name);
                     if (!File.Exists(path) || new FileInfo(path).Length == 0)
-                        return $"{name} is missing or empty. Run Install Streamline.cmd.";
+                        return $"{name} is missing or empty. Reinstall the current BloodborneX package.";
                     var expected = hashes.GetProperty(name).GetString();
                     using var stream = File.OpenRead(path);
                     var actual = Convert.ToHexString(SHA256.HashData(stream));
                     if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
-                        return $"{name} differs from the matched runtime. Run Install Streamline.cmd.";
+                        return $"{name} differs from the matched runtime. Reinstall the current BloodborneX package.";
                 }
                 var plugins = Directory.GetFiles(directory, "sl.*.dll")
                     .Select(Path.GetFileName)
                     .Where(name => name != null && !Files.Contains(name, StringComparer.OrdinalIgnoreCase))
                     .ToArray();
                 if (plugins.Length > 0)
-                    return $"An extra Streamline plugin ({plugins[0]}) is present. Run Install Streamline.cmd.";
+                    return $"An extra Streamline plugin ({plugins[0]}) is present. Reinstall the current BloodborneX package.";
                 return null;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException
                 or JsonException or KeyNotFoundException or InvalidOperationException)
             {
-                return "The Streamline runtime record is invalid. Run Install Streamline.cmd.";
+                return "The Streamline runtime record is invalid. Reinstall the current BloodborneX package.";
             }
         }
     }

@@ -1,4 +1,4 @@
-# BloodborneX 1.0.2-nr.rc5 — DLSS-G HDR test build
+# BloodborneX 1.0.2-nr.rc6 — DLSS-G HDR test build
 
 This is a prerelease for [issue #2](https://github.com/TheHiepDang/BloodborneX/issues/2).
 It ports Awakenchan's DLSS-G HDR presenter input from commit `08173e6` onto the
@@ -6,13 +6,13 @@ BloodborneX 1.0.1 NR/FSR engine. It is **not HDR gameplay validated yet**.
 
 ## Install and test
 
-1. Extract the entire Windows ZIP into a new folder. Keep the existing installation
-   and its settings, saves, mods and NR model untouched.
-2. Run `Install Streamline.cmd` in the extracted folder. It downloads NVIDIA's
-   official Streamline SDK 2.14.16, checks the archive SHA-256, installs the seven
-   matched runtime DLLs and their licence texts, and backs up any old Streamline
-   files in `engine/out/backups`. A mixed or incomplete set is refused by the
-   launcher.
+1. In a 1.0.1 installation, set **Update channel** to **Beta**, then use **Check now**
+   and **Update now** after this prerelease is published. Alternatively, extract
+   the entire Windows ZIP into a new folder. Keep saves and mods backed up.
+2. The Windows package includes NVIDIA's matched Streamline 2.14.16 runtime and
+   licence texts. There is no separate Streamline setup step. On the first launch
+   after an in-place update, older extra Streamline plugins are backed up under
+   `engine/out/backups` so they cannot be loaded with the new set.
 3. On an RTX 40/50 GPU with an HDR display, choose DLSS Frame Generation and
    enable HDR output. Restart the game after changing the initial DLSS-G selection.
 4. Test HDR10 and scRGB if your display supports both. Try NR off and on, menus,
@@ -27,7 +27,5 @@ DLSS-G is off by default. FSR 3.1 still refuses HDR output in this test build.
 The FSR allocation-retirement fix, NR Performance mode and single NR model path
 are preserved. The proprietary NR model is not included.
 
-This package does not bundle NVIDIA's Streamline DLLs. The installer retrieves
-them from NVIDIA's pinned release on the tester's machine. The fork's Discord
-release notifications, launcher community links, sign-in and profile status
-features have been removed.
+The fork's Discord release notifications, launcher community links, sign-in and
+profile status features have been removed.
