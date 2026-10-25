@@ -5,10 +5,15 @@ out/
 LauncherApp/
 dist/
 /releases/
+/agents_space/
 *.user
 .vs/
 .idea/
 launcher/windows/install.txt
+/tools/
 
 # User-supplied proprietary NR model: never commit or redistribute.
 /dlss/nvngx_dlssnr.dll
+
+# Optional per-GPU user-supplied NR runtime slots.
+/dlss/**/nvngx_dlssnr.dll

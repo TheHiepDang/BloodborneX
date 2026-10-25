@@ -3,8 +3,10 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$EngineSource,
-    [string]$Version = '0.9.9-nr.rc1',
+    [string]$Version = '1.0.1',
+    [string]$ReleaseNotesFile = 'NR-1.0.1.md',
     [string]$MsysRoot = 'C:\msys64',
+    [string]$CachedDownloads = '',
     [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\releases')
 )
 $ErrorActionPreference = 'Stop'
@@ -12,7 +14,9 @@ Set-StrictMode -Version Latest
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $engine = (Resolve-Path $EngineSource).Path
 $release = Join-Path ([IO.Path]::GetFullPath($ReleaseRoot)) $Version
-if ($Version -notmatch '^\d+\.\d+\.\d+-nr\.rc\d+$') { throw 'Expected version such as 0.9.9-nr.rc1' }
+if ($Version -notmatch '^\d+\.\d+\.\d+(-nr\.rc\d+)?$') { throw 'Expected a stable version such as 1.0.1 or an NR candidate such as 0.9.9-nr.rc2' }
+$notes = Join-Path $repo ("docs\$ReleaseNotesFile")
+if (!(Test-Path -LiteralPath $notes -PathType Leaf)) { throw "Missing release notes: $notes" }
 if (Test-Path -LiteralPath $release) { throw "Refusing to overwrite existing release: $release" }
 $bin = Join-Path $MsysRoot 'clang64\bin'
 $out = Join-Path $engine 'out'
@@ -36,7 +40,12 @@ try {
     }
     function Download([string]$Url, [string]$Name, [string]$Hash = '') {
         $target = Join-Path $cache $Name
-        Invoke-WebRequest -Uri $Url -OutFile $target -TimeoutSec 300
+        $cached = if ($CachedDownloads) { Join-Path $CachedDownloads $Name } else { '' }
+        if ($cached -and (Test-Path -LiteralPath $cached)) {
+            Copy-Item -LiteralPath $cached -Destination $target
+        } else {
+            Invoke-WebRequest -Uri $Url -OutFile $target -TimeoutSec 300
+        }
         $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
         if ($Hash -and $actual -ne $Hash) { throw "Download hash mismatch: $Name" }
         $script:downloads.Add([ordered]@{name=$Name; url=$Url; sha256=$actual})
@@ -44,6 +53,7 @@ try {
     }
     $script:downloads = [Collections.Generic.List[object]]::new()
     Run 'dotnet' @('run','--project',(Join-Path $repo 'launcher\windows\tests\UpdateChecks\UpdateChecks.csproj'),'-c','Release')
+    Run 'dotnet' @('run','--project',(Join-Path $repo 'launcher\windows\tests\NrRuntimeChecks\NrRuntimeChecks.csproj'),'-c','Release')
     $publish = Join-Path $build 'launcher'
     Run 'dotnet' @('publish', (Join-Path $repo 'launcher\windows\BloodborneLauncher\BloodborneLauncher.csproj'),
         '-c','Release','-r','win-x64','--self-contained','true','-p:PublishSingleFile=true',
@@ -113,7 +123,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $engine 'licenses') -Destination (Join-Path $package 'licenses\engine') -Recurse
     Copy-Item -LiteralPath (Join-Path $MsysRoot 'clang64\share\licenses') -Destination (Join-Path $package 'licenses\msys2-clang64') -Recurse
     & (Join-Path $PSScriptRoot 'copy-nr-notices.ps1') -EngineSource $engine -Package $package
-    foreach ($name in @('DLSSNR-HANDOFF.md','NR-RC1.md','NR-RELEASE.md')) {
+    foreach ($name in @('DLSSNR-HANDOFF.md','NR-RC1.md','NR-RC2.md','NR-RELEASE.md','RELEASING.md',$ReleaseNotesFile)) {
         Copy-One (Join-Path $repo "docs\$name") (Join-Path $package "docs\$name")
     }
     Copy-One (Join-Path $repo 'docs\NR-RELEASE.md') (Join-Path $package 'START-HERE.md')
@@ -121,11 +131,20 @@ try {
     @{version=$Version;engine="lantern-native-nr-$Version";update_family='bloodbornex-native-nr-v1';repository='TheHiepDang/BloodborneX'} |
         ConvertTo-Json | Set-Content (Join-Path $package 'package.json') -Encoding utf8
     Copy-One (Join-Path $package 'package.json') (Join-Path $release 'package.json')
+    Copy-One (Join-Path $repo 'README.md') (Join-Path $package 'README.md')
+    Copy-One $notes (Join-Path $package 'RELEASE-NOTES.md')
+    Copy-One $notes (Join-Path $release 'RELEASE-NOTES.md')
+    $supplemental = @('frame-generation-memory-fix.patch','nr-runtime-compatibility-fix.patch') | ForEach-Object {
+        @{name=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $repo "engine\$_")).Hash}
+    }
+
     $provenance = [ordered]@{
         version=$Version; created_utc=[DateTime]::UtcNow.ToString('o');
         repository_head=(& git -C $repo rev-parse HEAD); dirty_source=$true;
         engine_upstream='https://github.com/DarkIzuku/bloodborne_pc'; engine_base='8ecba9a4abdd54747e31d7fee54982e422b5f8e2';
         engine_patch_sha256=(Get-FileHash (Join-Path $repo 'engine\bbhost-changes.patch')).Hash;
+        supplemental_engine_patches=@($supplemental); applied_engine_snapshot='LanternEngine-source/engine-source';
+        fixes=@('FSR FG transient allocation retirement','RTX 50 original NR runtime selection','NR Performance model scaling','Consistent stable release version and updater assets');
         tested_engine_outputs=$engineHashes; downloads=$script:downloads;
         nr_runtime_included=$false; startup='bundled Python; native bb-start intentionally omitted';
         optional_assets_omitted=@('Streamline/DLSS-G','FSR4/FSR4.1.1','bbbridge online helper');
@@ -135,8 +154,23 @@ try {
     # Source snapshot includes uncommitted final sources, but excludes ignored binaries/runtime/user data.
     $source = Join-Path $release 'LanternEngine-source'
     function Copy-GitSource([string]$From,[string]$To) {
-        $files = & git -C $From -c core.quotepath=false ls-files --cached --others --exclude-standard
-        if ($LASTEXITCODE) { throw "Cannot enumerate source $From" }
+        if (Test-Path -LiteralPath (Join-Path $From '.git')) {
+            $files = & git -C $From -c core.quotepath=false ls-files --cached --others --exclude-standard
+            if ($LASTEXITCODE) { throw "Cannot enumerate source $From" }
+        } else {
+            # Applied source snapshots are supported without creating a repository.
+            # Filter again below, independently of ignore files or rg glob ordering.
+            $listed = & rg --files --hidden --no-ignore $From
+            if ($LASTEXITCODE -gt 1) { throw "Cannot enumerate source snapshot $From" }
+            $files = foreach ($absolute in $listed) {
+                $relative = [IO.Path]::GetRelativePath($From,$absolute).Replace('\','/')
+                if ($relative -match '(^|/)(\.git|\.vs|\.idea|\.agents|\.codex|out|bin|obj|build|pgo|user|logs|dist|test-temp|__pycache__|\.pytest_cache|fsr4_shaders|fsr4_411)(/|$)' -or
+                    $relative -match '^(1060|docs/savedata_route|launcher-windows)/' -or
+                    $relative -match '(^|/)(bbport\.ini|lantern\.ini|mods\.json|patches\.json|game_dir\.txt|prepared\.json|message[^/]*\.txt|perf\.data|vkd3d-proton\.cache)$' -or
+                    $relative -match '\.(dll|exe|pdb|dmp|log|orig|bak|old|obj|o|a|lib|zip|7z|mp4|cache|pyc)$') { continue }
+                $relative
+            }
+        }
         foreach ($relative in $files | Select-Object -Unique) {
             $file = Join-Path $From $relative
             if ((Test-Path -LiteralPath $file -PathType Leaf) -and $relative -notmatch '(^|/)(nvngx_dlssnr\.dll|releases)(/|$)') {
@@ -149,6 +183,21 @@ try {
     foreach ($submodule in @('gpu/third_party/fsr-vulkan','gpu/third_party/imgui','third_party/LibAtrac9')) {
         Copy-GitSource (Join-Path $engine $submodule) (Join-Path $source "engine-source/$submodule")
     }
+    foreach ($helper in @('build-nr-release.ps1','nr-release-default.ini','copy-nr-notices.ps1')) {
+        Copy-One (Join-Path $PSScriptRoot $helper) (Join-Path $source "BloodborneX/tools/$helper")
+    }
+    @'
+# Building this applied source snapshot
+
+Use engine-source/ directly: it already includes the current release fixes and
+vendored source. Do not reapply BloodborneX/engine/bbhost-changes.patch on top.
+That cumulative legacy patch is retained as historical context; the applied
+snapshot is authoritative for this release. See BUILD-PROVENANCE.json.
+
+Build engine-source/build.sh with the documented MSYS2 CLANG64 dependencies.
+The launcher source is BloodborneX/launcher/windows. No game or NR runtime is
+included. Packaging scripts are in BloodborneX/tools.
+'@ | Set-Content -LiteralPath (Join-Path $source 'BUILD-FROM-SNAPSHOT.md') -Encoding utf8
     Copy-One (Join-Path $package 'BUILD-PROVENANCE.json') (Join-Path $source 'BUILD-PROVENANCE.json')
     # The only binaries allowed in the portable tree are explicitly built/copied above.
     $forbidden = Get-ChildItem $package,$source -Recurse -File | Where-Object {

@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 
 namespace BloodborneLauncher.Core
 {
@@ -120,7 +120,7 @@ namespace BloodborneLauncher.Core
                 ["BB_DATA_DIR"] = Paths.DataDir,
                 ["BB_CONFIG"] = Paths.IniPath,
                 // Use the same user-supplied runtime location shown by launcher validation.
-                ["BB_DLSS_DIR"] = Path.GetDirectoryName(DlssNrRuntime.PathName)!,
+                ["BB_DLSS_DIR"] = DlssNrRuntime.DirectoryName,
                 ["BB_GAME_DIR"] = GameDir(s),
                 ["BB_USER_DIR"] = UserDir(s),
                 ["BB_MODS_DIR"] = ModsDir(s),
@@ -273,3 +273,4 @@ namespace BloodborneLauncher.Core
         }
     }
 }
+

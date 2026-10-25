@@ -1,0 +1,153 @@
+--- a/gpu/third_party/fsr-vulkan/src/ffx_vk_fsr3_3_1_6_framegen.cpp
++++ b/gpu/third_party/fsr-vulkan/src/ffx_vk_fsr3_3_1_6_framegen.cpp
+@@ -441,7 +441,7 @@
+     FfxVkFsr3_3_1_6FrameGenerationContext* context,
+     const FfxVkFsr3_3_1_6FrameGenerationPrepareInfo* info)
+ {
+-    if (!context || !info || context->prepared ||
++    if (!context || !info || context->prepared || info->frameId == 0u ||
+         info->commandBuffer == VK_NULL_HANDLE || info->renderWidth == 0u || info->renderHeight == 0u ||
+         info->renderWidth > context->maxRenderWidth ||
+         info->renderHeight > context->maxRenderHeight ||
+@@ -463,6 +463,9 @@
+         !valid_image(info->depth, VK_FORMAT_R32_SFLOAT, info->renderWidth, info->renderHeight, false) ||
+         !valid_motion_image(info->motionVectors, info->renderWidth, info->renderHeight))
+         return FFX_VK_FSR3_3_1_6_FRAMEGEN_ERROR_INVALID_ARGUMENT;
++    /* Tag transient constants and descriptors before initialization jobs too.
++     * Frame zero is reserved for context-lifetime allocations in the bridge. */
++    ffxVkFsr3_3_1_5BridgeBeginFrame(context->bridge, info->frameId);
+     if (!context->initialized) {
+         const OwnedSharedImage shared[] = {
+             context->opticalFlowVector, context->opticalFlowScd, context->dilatedDepth,
+@@ -656,6 +659,9 @@
+ {
+     if (!context)
+         return FFX_VK_FSR3_3_1_6_FRAMEGEN_ERROR_INVALID_ARGUMENT;
++    /* The caller has waited for GPU completion. Release descriptor sets before
++     * the imported image views they reference, and reclaim constant buffers. */
++    ffxVkFsr3_3_1_5BridgeRetireFrame(context->bridge, completedFrameId);
+     if (context->prepared && context->frameId <= completedFrameId) {
+         for (const FfxVkFsr3_3_1_5Resource resource : context->pendingImports)
+             ffxVkFsr3_3_1_5BridgeReleaseImportedImage(context->bridge, resource);
+--- a/gpu/third_party/fsr-vulkan/src/ffx_vk_fsr3_3_1_5_bridge.cpp
++++ b/gpu/third_party/fsr-vulkan/src/ffx_vk_fsr3_3_1_5_bridge.cpp
+@@ -52,6 +52,7 @@
+     VkBuffer buffer = VK_NULL_HANDLE;
+     VkDeviceMemory memory = VK_NULL_HANDLE;
+     VkDeviceSize size = 0u;
++    VkDeviceSize allocationSize = 0u;
+     uint64_t frameId = 0u;
+ };
+ 
+@@ -868,6 +869,7 @@
+     }
+     vkUnmapMemory(bridge->device, constantBuffer->memory);
+     constantBuffer->size = size;
++    constantBuffer->allocationSize = requirements.size;
+     constantBuffer->frameId = bridge->activeFrameId;
+     outConstantBuffer->num32BitEntries = size / sizeof(uint32_t);
+     outConstantBuffer->data = reinterpret_cast<uint32_t*>(constantBuffer.get());
+@@ -1091,6 +1093,10 @@
+         for (const std::unique_ptr<BridgeResource>& resource : bridge->resources) {
+             if (resource && resource->owned)
+                 usage.totalUsageInBytes += resource->allocationSize;
++        }
++        for (const auto& constantBuffer : bridge->constantBuffers) {
++            if (constantBuffer)
++                usage.totalUsageInBytes += constantBuffer->allocationSize;
+         }
+     }
+     /* The bridge deliberately gives every SDK-owned resource a distinct
+--- a/gpu/third_party/fsr-vulkan/tests/fsr3_3_1_6_framegen_api_smoke.cpp
++++ b/gpu/third_party/fsr-vulkan/tests/fsr3_3_1_6_framegen_api_smoke.cpp
+@@ -7,6 +7,7 @@
+ #include "ffx_vk_vulkan_compat.h"
+ 
+ #include <cstdio>
++#include <cstdlib>
+ #include <cstring>
+ #include <limits>
+ #include <vector>
+@@ -220,6 +221,11 @@
+     {
+         FfxVkFsr3_3_1_6FrameGenerationPrepareInfo invalid = prepare;
+         invalid.color.width = 127u;
++        if (ffxVkFsr3_3_1_6FrameGenerationContextRecordPrepare(context, &invalid) !=
++            FFX_VK_FSR3_3_1_6_FRAMEGEN_ERROR_INVALID_ARGUMENT)
++            return false;
++        invalid = prepare;
++        invalid.frameId = 0u;
+         if (ffxVkFsr3_3_1_6FrameGenerationContextRecordPrepare(context, &invalid) !=
+             FFX_VK_FSR3_3_1_6_FRAMEGEN_ERROR_INVALID_ARGUMENT)
+             return false;
+@@ -337,7 +343,8 @@
+     ValidationState validation{};
+     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
+     app.apiVersion = VK_API_VERSION_1_2;
+-    if (!has_validation_layer())
++    const bool validationEnabled = has_validation_layer();
++    if (!validationEnabled && !std::getenv("FSR316_SMOKE_ALLOW_NO_VALIDATION"))
+         return 77;
+     VkDebugUtilsMessengerCreateInfoEXT debug{VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
+     debug.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+@@ -351,15 +358,15 @@
+     const char* instanceExtensions[] = {VK_EXT_DEBUG_UTILS_EXTENSION_NAME};
+     VkInstanceCreateInfo instanceInfo{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+     instanceInfo.pApplicationInfo = &app;
+-    instanceInfo.pNext = &debug;
+-    instanceInfo.enabledLayerCount = 1u;
++    instanceInfo.pNext = validationEnabled ? &debug : nullptr;
++    instanceInfo.enabledLayerCount = validationEnabled ? 1u : 0u;
+     instanceInfo.ppEnabledLayerNames = layers;
+     instanceInfo.enabledExtensionCount = 1u;
+     instanceInfo.ppEnabledExtensionNames = instanceExtensions;
+     if (vkCreateInstance(&instanceInfo, nullptr, &instance) != VK_SUCCESS ||
+         !choose_compute_device(instance, &physical, &family))
+         goto cleanup;
+-    {
++    if (validationEnabled) {
+         const auto createMessenger = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+             vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+         destroyMessenger = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+@@ -482,8 +489,41 @@
+                     FFX_VK_FSR3_3_1_6_FRAMEGEN_OK, "retire reset+temporal frames"))
+             goto cleanup;
+     }
++    /* Reuse one context for long enough to expose per-frame retention. Query
++     * actual constant-buffer allocation bytes, not just static SDK images. */
++    {
++        FfxVkFsr3_3_1_6FrameGenerationMemoryUsage baseline{};
++        ffxVkFsr3_3_1_6FrameGenerationContextGetMemoryUsage(context, &baseline);
++        for (uint64_t frame = 3u; frame <= 66u; ++frame) {
++            VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
++            VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
++            submit.commandBufferCount = 1u;
++            submit.pCommandBuffers = &commands;
++            if (!expect(vkResetCommandPool(device, pool, 0u) == VK_SUCCESS &&
++                        vkBeginCommandBuffer(commands, &begin) == VK_SUCCESS &&
++                        record_frame(context, commands, images, colorFormat, motionFormat,
++                                     transferFunction, maxLuminance, frame, false, false, true, true) &&
++                        vkEndCommandBuffer(commands) == VK_SUCCESS &&
++                        vkQueueSubmit(queue, 1u, &submit, VK_NULL_HANDLE) == VK_SUCCESS &&
++                        vkQueueWaitIdle(queue) == VK_SUCCESS, "submit retention regression frame"))
++                goto cleanup;
++            FfxVkFsr3_3_1_6FrameGenerationMemoryUsage live{}, retired{};
++            ffxVkFsr3_3_1_6FrameGenerationContextGetMemoryUsage(context, &live);
++            if (!expect(ffxVkFsr3_3_1_6FrameGenerationContextRetireFrame(context, frame) ==
++                        FFX_VK_FSR3_3_1_6_FRAMEGEN_OK, "retire retention regression frame"))
++                goto cleanup;
++            ffxVkFsr3_3_1_6FrameGenerationContextGetMemoryUsage(context, &retired);
++            if (!expect(live.totalUsageInBytes > retired.totalUsageInBytes &&
++                        retired.totalUsageInBytes == baseline.totalUsageInBytes,
++                        "transient allocations reclaimed and retired memory stays bounded"))
++                goto cleanup;
++        }
++        std::printf("FI/OF retention regression: 64 frames, retired memory stable at %llu bytes\n",
++                    (unsigned long long)baseline.totalUsageInBytes);
++    }
+     if (!expect(validation.errors == 0u, "Vulkan validation errors"))
+         goto cleanup;
++    std::printf("Vulkan validation: %s\n", validationEnabled ? "enabled" : "unavailable (explicitly allowed)");
+     std::printf("FSR3.1.6 public FI/OF Vulkan API reset+temporal smoke passed (external distortion field; %s color, %s motion, %s; validation warnings=%u)\n",
+                 colorFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? "RGBA16F" : "RGBA8",
+                 motionFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? "RGBA16F" : "RG16F",

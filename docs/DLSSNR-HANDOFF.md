@@ -102,9 +102,24 @@ behavior. Bypass NR for non-DLSS providers and invalid/menu/loading inputs.
 
 ## Runtime, licensing and packaging
 
-The user supplies `dlss/nvngx_dlssnr.dll`, x64 unsigned DVS production 310.9.16.0,
-276,162,560 bytes, SHA-256
+The user supplies `dlss/nvngx_dlssnr.dll`. The existing gameplay-validated file is
+the openNR FP16 compatibility derivative of 310.9.16.0, 276,162,560 bytes, SHA-256
 `CDFA6C1EC784867182164C7836F324F087B5C9F374D0C9FE46F54999FEABF3ED`.
+The runtime-compatibility hotfix also recognizes the original October 16 build:
+266,424,944 bytes, SHA-256
+`2BC19BC09A7B89DD44F73E2AC0108FCC586E2154BDD0830F242F4F040E28789F`.
+The original has passed identity, Vulkan-export and Vulkan-initialization checks;
+feature creation/evaluation and gameplay, particularly on the reporting RTX 5080,
+remain pending. Do not conflate recognition or initialization with visual validation.
+The original RC1 accepted only the compatibility derivative, despite labelling it
+as a generic DVS production runtime. See `NR-RELEASE.md` for the two-build table.
+The only model path is `dlss/nvngx_dlssnr.dll`. Users select the appropriate
+DLL themselves: unmodified October 16 for GeForce RTX 50-series, openNR FP16
+compatibility for other RTX cards. No per-GPU subfolders are searched.
+The engine's Vulkan GPU is authoritative for compatibility handling; the launcher
+passes the flat DLL's containing directory through `BB_DLSS_DIR`.
+The original is refused outside GeForce RTX 50-series. Both use the existing
+named Vulkan forwarder without changing the supplied DLL.
 Never commit, upload, re-sign, patch or redistribute it. Unknown models fail closed;
 `BB_DLSS_NR_ALLOW_UNKNOWN=1` is unsupported developer research only.
 The open-source `nvngx.dll_dlssnr.dll` caller-gate forwarder is separately built.

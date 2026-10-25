@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
@@ -65,8 +65,12 @@ namespace BloodborneLauncher.Core
 
         /// <summary>This build as players see it: "v0.9.6" or "v0.9.7 beta 2".</summary>
         public static string CurrentLabel => IsLocalBuild
-            ? $"v{Current} NR RC{Math.Max(1, CurrentBeta / 100)}"
+            ? NrLabel(Current, CurrentBeta)
             : Label(Current, CurrentBeta);
+
+        internal static string NrLabel(Version version, int beta) => beta > 0
+            ? $"v{version} NR RC{Math.Max(1, beta / 100)}"
+            : $"v{version} NR";
 
         /// <summary>The channel the player chose; until they choose, a beta build stays on beta.</summary>
         public static bool BetaChannel(LauncherSettings s) => s.Str("update_channel") switch
