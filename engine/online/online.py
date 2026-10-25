@@ -141,13 +141,13 @@ def write_overrides(data, overrides):
 def configure_huntersdream(settings, data, env):
     """The Hunter's Dream pool: the engine's own backend for it (BB_NET_BACKEND=thd), bbhost's
     protocol. The game's servers (*.scej-network.jp, its own ports) and play logs (the API port)
-    go to the game server; the account comes from the launcher's Discord sign-in."""
+    go to the game server; the account token comes from the launcher."""
     game_api = http_base(game_server(settings.get('online_game_api', '')))
     origin = urlsplit(game_api)
     if origin.path not in ('', '/'):
         raise ValueError('The game server needs an origin without a path')
     if not env.get('BB_THD_TOKEN') or not env.get('BB_THD_ONLINE_ID'):
-        raise ValueError("Sign in to The Hunter's Dream with Discord on the launcher's Online page")
+        raise ValueError("Connect your account on the launcher's Online page")
     scheme, host = origin.scheme, origin.hostname
     base = f'{scheme}://{host}'
     overrides = {'*.scej-network.jp': base}

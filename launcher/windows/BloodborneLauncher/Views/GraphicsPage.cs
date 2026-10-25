@@ -187,10 +187,6 @@ namespace BloodborneLauncher.Views
             Hardware.Detect() is { Rtx: true } hardware &&
             System.Text.RegularExpressions.Regex.IsMatch(hardware.Gpu, @"RTX\s*(PRO\s*)?[45]0\d\d", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
-        /// <summary>NVIDIA Streamline's runtime beside the engine (tools/fetch_streamline.sh): DLSS Frame Generation.</summary>
-        private static bool StreamlineFound() =>
-            File.Exists(Path.Combine(Paths.BinariesDir, "sl.interposer.dll")) && File.Exists(Path.Combine(Paths.BinariesDir, "sl.dlss_g.dll"));
-
         private static SymbolRegular EffectIcon(string key) => key switch
         {
             "skip_intro" => SymbolRegular.FastForward24,
@@ -234,12 +230,13 @@ namespace BloodborneLauncher.Views
 
             // Frame generation: DLSS's own rows only with DLSS chosen.
             var frameGen = Ini.Get("frame_gen", "off");
+            var streamlineProblem = frameGen == "dlss" ? StreamlineRuntime.Problem(Paths.BinariesDir) : null;
             _frameGenFramesCard.IsEnabled = frameGen == "dlss";
             _reflexCard.IsEnabled = frameGen == "dlss";
             _frameGenCapCard.IsEnabled = frameGen != "off";
             SetHint(_frameGenHint, frameGen switch
             {
-                "dlss" when !StreamlineFound() => L.T("NVIDIA Streamline (sl.interposer.dll, sl.dlss_g.dll) is missing from the engine folder: the game uses no frame generation"),
+                "dlss" when streamlineProblem is not null => streamlineProblem,
                 "dlss" when !DlssFrameGenGpu() => L.T("Needs an NVIDIA RTX 40 or 50 GPU with Hardware-accelerated GPU scheduling on; other GPUs: choose FSR 3.1"),
                 "dlss" => L.T("RTX 40: 2x; RTX 50: up to 6x. Loaded when the game starts; in game you can switch it off and on (Insert or L3 + R3)"),
                 "fsr3" => L.T("Any GPU. Not in menus, movies or with HDR output"),

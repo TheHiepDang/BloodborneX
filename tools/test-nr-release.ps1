@@ -31,13 +31,15 @@ if ($metadata.update_family -ne 'bloodbornex-native-nr-v1' -or $metadata.reposit
 $checks.Add('Fork update metadata and NR compatibility marker present.')
 $oldPath = $env:PATH
 $oldBytecode = $env:PYTHONDONTWRITEBYTECODE
+$oldLocation = Get-Location
 try {
     $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
     $env:PYTHONDONTWRITEBYTECODE = '1'
+    Set-Location -LiteralPath $package
     $python = Join-Path $package 'engine\tools\python\python.exe'
     & $python --version
     if ($LASTEXITCODE) { throw 'Bundled Python failed' }
-    & $python -c "import run_windows,patches,game_check,engine_assets; from pathlib import Path; s=patches.read_settings(Path(r'$package')/'lantern.ini'); assert s['dlss_nr']=='0' and s['dlss_nr_white_point']=='0.125'; s['dlss_nr']='1'; assert patches.render_size(s)==(1280,720); s['dlss_nr_height']='480'; assert patches.render_size(s)==(852,480); s['preset']='0'; assert patches.render_size(s) is None; assert Path(game_check.__file__).with_name('image_109_hashes.txt').is_file(); print('PASS: bundled startup imports, defaults, 720p/480p/DLAA preparation')"
+    & $python -c "import run_windows,patches,game_check,engine_assets; from pathlib import Path; s=patches.read_settings(Path('lantern.ini')); assert s['dlss_nr']=='0' and s['dlss_nr_white_point']=='0.125'; s['dlss_nr']='1'; assert patches.render_size(s)==(1280,720); s['dlss_nr_height']='480'; assert patches.render_size(s)==(852,480); s['preset']='0'; assert patches.render_size(s) is None; assert Path(game_check.__file__).with_name('image_109_hashes.txt').is_file(); print('PASS: bundled startup imports, defaults, 720p/480p/DLAA preparation')"
     if ($LASTEXITCODE) { throw 'Bundled startup test failed' }
     $checks.Add('Bundled Python and startup imports work without system Python/MSYS2; NR defaults and 720p/480p/DLAA preparation pass.')
     $probe = & (Join-Path $package 'engine\out\bb-probe.exe') 2>&1
@@ -47,16 +49,15 @@ try {
     if ($LASTEXITCODE) { throw 'Packaged Vulkan capability probe failed' }
     $checks.Add('Packaged Vulkan capability probe succeeds with PATH restricted to Windows folders.')
 } finally {
+    Set-Location -LiteralPath $oldLocation.Path
     $env:PATH = $oldPath
     $env:PYTHONDONTWRITEBYTECODE = $oldBytecode
 }
-$report = @('# NR RC1 package validation','',"Completed $([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss zzz')).",'')
+$report = @("# BloodborneX $($metadata.version) portable validation",'',"Completed $([DateTimeOffset]::UtcNow.ToString('o')).",'')
 $report += $checks | ForEach-Object { "- PASS: $_" }
-$report += @('', 'Extracted into a fresh temporary folder with spaces; tests did not use the task workspace or machine Python/MSYS2 PATH.', '',
-    'Renderer regression tests were rerun separately: settings, upscaler support, UI composition, motion history, RTX 3070 HDR/LDR NR composition, and 37 Python patch tests pass.',
-    'Both launchers compile. Fork updater checks cover RC ordering, Windows-vs-source ZIP selection, metadata compatibility, and launcher-only rejection.', '',
-    'The packaged game was not newly played end-to-end. Gameplay acceptance applies to the identical tested engine and SR binaries described in docs/NR-RC1.md.',
-    'No GitHub publication or push was performed. The unofficial NR runtime is intentionally absent.', '',
+$report += @('', 'A fresh temporary extraction with spaces was used. Startup ran without system Python/MSYS2 PATH.',
+    'These checks do not launch gameplay or certify rendering/NR visual quality. Vulkan validation-layer coverage is not claimed.',
+    'No game, saves or proprietary NR model is included. No GitHub publication or push was performed.', '',
     "Temporary smoke extraction retained at: $testDir")
 $report | Set-Content (Join-Path $releaseDir 'VALIDATION.md') -Encoding utf8
 $report

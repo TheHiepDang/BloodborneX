@@ -254,11 +254,6 @@
         };
 
         /// <summary>pad_icons: the game's controller icons as they are (PlayStation's) or as an Xbox controller's buttons; automatic follows the controller in use.</summary>
-        public static readonly Choice[] DiscordStatus =
-        {
-            new(L.T("Off"), "off"), new("Lantern Engine", "lantern"), new(L.T("Custom"), "custom"),
-        };
-
         public static readonly Choice[] PadIcons =
         {
             new(L.T("Automatic (default)"), "auto"), new("PlayStation", "playstation"), new("Xbox", "xbox"),

@@ -17,7 +17,7 @@ namespace BloodborneLauncher.Views
         private readonly Button _test;
 
         public OnlinePage() : base(L.T("Online"),
-            L.T("1. Turn on Play online. 2. Connect your Hunter's Dream account below (with Discord, or without it). ") +
+            L.T("1. Turn on Play online. 2. Connect your Hunter's Dream account below. ") +
             L.T("3. In the game, choose online at the title screen: The Hunter's Dream's welcome message means you are online. ") +
             L.T("Everyone needs game version 1.09."))
         {
@@ -59,7 +59,6 @@ namespace BloodborneLauncher.Views
 
         private readonly Button _hdButton;
         private readonly System.Windows.Controls.TextBlock _hdHint;
-        private CancellationTokenSource? _linking;
 
         private void ShowLink()
         {
@@ -67,19 +66,17 @@ namespace BloodborneLauncher.Views
             var linked = name.Length > 0 && S.HuntersDreamToken.Length > 0;
             // Refused by the server in a game (Workspace, from the session log): marked until a new sign-in.
             var refused = linked ? S.HuntersDreamRefused : "";
-            SetHint(_hdHint, !linked ? L.T("Not connected. Connect with Discord, or create an account here without it")
+            SetHint(_hdHint, !linked ? L.T("Not connected. Create an account here or recover one with a code")
                 : refused.Length > 0 ? L.F($"The Hunter's Dream refused the sign-in as {name} ({refused}). Sign in again: until then nobody can summon or invite you")
                 : L.F($"Connected as {name}"));
             _hdHint.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty,
                 refused.Length > 0 ? "WarningTextBrush" : "TextFillColorTertiaryBrush");
-            if (_linking is null) _hdButton.Content = !linked ? L.T("Connect") : refused.Length > 0 ? L.T("Sign in again") : L.T("Disconnect");
+            _hdButton.Content = !linked ? L.T("Connect") : refused.Length > 0 ? L.T("Sign in again") : L.T("Disconnect");
         }
 
-        /// <summary>The device link: the code goes to the clipboard and the website opens; pressing the
-        /// button again while it waits cancels. Connected, the button disconnects.</summary>
-        /// <summary>The Hunter's Dream account without Discord (#37): created with a name, or recovered
+        /// <summary>The Hunter's Dream account: created with a name, or recovered
         /// with the name and its recovery code. A new recovery code is shown once.</summary>
-        private async Task AccountWithoutDiscordAsync(bool recover)
+        private async Task AccountWithCodeAsync(bool recover)
         {
             var fields = recover
                 ? new[] { new Prompt.Field(L.T("Account name")), new Prompt.Field(L.T("Recovery code")) }
@@ -118,13 +115,8 @@ namespace BloodborneLauncher.Views
 
         private async Task LinkAsync()
         {
-            if (_linking is { } running)
-            {
-                running.Cancel();
-                return;
-            }
             // A refused sign-in signs in again instead: its token is only replaced once the new sign-in
-            // works (an account without Discord gets back in only with its recovery code).
+            // works (a local account gets back in only with its recovery code).
             if (S.HuntersDreamToken is { Length: > 0 } token && S.HuntersDreamRefused.Length == 0)
             {
                 await HuntersDream.LogoutAsync(token);
@@ -137,41 +129,10 @@ namespace BloodborneLauncher.Views
                 return;
             }
             var how = Prompt.Choose(L.T("The Hunter's Dream account"),
-                L.T("Sign in with Discord, or use an account held by this PC (a name and a recovery code, no Discord needed)."),
-                L.T("Cancel"), "Discord", L.T("Without Discord…"), L.T("Recover with a code…"));
-            if (how <= 0) return;
-            if (how >= 2)
-            {
-                await AccountWithoutDiscordAsync(recover: how == 3);
-                return;
-            }
-            _linking = new CancellationTokenSource();
-            _hdButton.Content = L.T("Cancel");
-            try
-            {
-                var link = await HuntersDream.StartLinkAsync(_linking.Token);
-                ClipboardText.Set(link.UserCode);
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(link.Page) { UseShellExecute = true });
-                SetHint(_hdHint, L.F($"Enter the code {link.UserCode} on the page that opened (it is on the clipboard), then approve"));
-                _hdHint.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "TextFillColorTertiaryBrush");
-                var (name, linked) = await HuntersDream.WaitLinkAsync(link, _linking.Token);
-                S.HuntersDreamToken = linked;
-                S.Set("hd_name", name);
-                Ini.Set("online_pool", "huntersdream");
-                Ws.SaveNow();
-                Ws.Log(L.F($"The Hunter's Dream: connected as {name}"), LogLevel.Good);
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception e)
-            {
-                Prompt.Tell(L.T("Connecting failed"), e.Message);
-            }
-            finally
-            {
-                _linking.Dispose();
-                _linking = null;
-                ShowLink();
-            }
+                L.T("Create an account held by this PC, or recover one with its code."),
+                L.T("Cancel"), L.T("Create account"), L.T("Recover with a code…"));
+            if (how > 0)
+                await AccountWithCodeAsync(recover: how == 2);
         }
 
         private void IniText(SymbolRegular icon, string title, string? hint, string placeholder, string key, double width = 300) =>
@@ -182,7 +143,7 @@ namespace BloodborneLauncher.Views
             _online.IsChecked = Ini.Get("online_enabled") == "1";
             // A game since the page was last shown may have had the sign-in refused (not while a link
             // waits: its hint shows the code to enter).
-            if (_linking is null) ShowLink();
+            ShowLink();
         }
 
         private async Task TestAsync()

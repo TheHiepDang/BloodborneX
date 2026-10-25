@@ -40,7 +40,7 @@ struct Config {
 };
 const Config& Cfg();
 
-// The account the launcher signed in with Discord. Without one the game stays signed out.
+// The account the launcher connected. Without one the game stays signed out.
 std::string AccountName();
 std::string AccountToken();
 bool SignedIn();

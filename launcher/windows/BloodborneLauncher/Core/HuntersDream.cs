@@ -6,9 +6,8 @@ namespace BloodborneLauncher.Core
 {
     /// <summary>
     /// Online play with The Hunter's Dream (the engine's scripts/online.py). Its account has no
-    /// password: this PC is linked to it with a device code the player approves on the website
-    /// (signed in with Discord), as bbhost does it (droogie/bbhost src/net/account.cpp), and the
-    /// server hands back a token, kept encrypted in the launcher settings.
+    /// password: this PC receives a token when an account is created or recovered with its code.
+    /// The token is kept encrypted in the launcher settings.
     /// </summary>
     public static class HuntersDream
     {
@@ -18,8 +17,6 @@ namespace BloodborneLauncher.Core
         public const string Server = "https://thehuntersdream.com";
 
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
-
-        public sealed record Link(string DeviceCode, string UserCode, string Page, int Interval, int ExpiresIn);
 
         /// <summary>"BloodBorneButPc on PC-NAME": what the website's link page shows before approving.</summary>
         private static string DeviceName()
@@ -41,46 +38,7 @@ namespace BloodborneLauncher.Core
             return reply;
         }
 
-        /// <summary>Starts a device link: the player opens <see cref="Link.Page"/> and enters the code.</summary>
-        public static async Task<Link> StartLinkAsync(CancellationToken cancel)
-        {
-            var reply = await Call("/auth/device/start", new JsonObject { ["DeviceName"] = DeviceName() }, cancel);
-            var link = new Link(reply["DeviceCode"]?.GetValue<string>() ?? "", reply["UserCode"]?.GetValue<string>() ?? "",
-                reply["VerificationUri"]?.GetValue<string>() ?? Server + "/link",
-                Math.Max(1, reply["Interval"]?.GetValue<int>() ?? 5), reply["ExpiresIn"]?.GetValue<int>() ?? 600);
-            if (link.DeviceCode.Length == 0 || link.UserCode.Length == 0) throw new InvalidOperationException(L.T("no code in the reply"));
-            return link;
-        }
-
-        /// <summary>Waits until the link is approved there. Returns (online name, token).</summary>
-        public static async Task<(string Name, string Token)> WaitLinkAsync(Link link, CancellationToken cancel)
-        {
-            var interval = link.Interval;
-            var until = DateTime.UtcNow.AddSeconds(link.ExpiresIn);
-            while (DateTime.UtcNow < until)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(interval), cancel);
-                var reply = await Call("/auth/device/poll", new JsonObject { ["DeviceCode"] = link.DeviceCode }, cancel);
-                switch (reply["Status"]?.GetValue<string>())
-                {
-                    case "approved":
-                        var token = reply["Token"]?.GetValue<string>() ?? "";
-                        var name = reply["OnlineId"]?.GetValue<string>() ?? "";
-                        if (token.Length == 0 || name.Length == 0) throw new InvalidOperationException(L.T("no token in the reply"));
-                        return (name, token);
-                    case "slow_down":
-                        interval += 5;
-                        break;
-                    case "denied":
-                        throw new InvalidOperationException(L.T("the link was denied on the website"));
-                    case "expired":
-                        throw new InvalidOperationException(L.T("the code expired: start again"));
-                }
-            }
-            throw new InvalidOperationException(L.T("the code expired: start again"));
-        }
-
-        /// <summary>An account held by this PC, without Discord: the name becomes the online name.
+        /// <summary>An account held by this PC, the name becomes the online name.
         /// Returns (name, token, recovery code); the code is shown once and must be written down.</summary>
         public static async Task<(string Name, string Token, string RecoveryCode)> CreateAccountAsync(string name, CancellationToken cancel)
         {

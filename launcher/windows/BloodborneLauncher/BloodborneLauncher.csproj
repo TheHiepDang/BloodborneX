@@ -24,7 +24,6 @@
     <Resource Include="lantern-beta.ico" />
     <Resource Include="lantern-stable.ico" />
     <Resource Include="lantern-j3loo.ico" />
-    <Resource Include="Assets\discord-logo.png" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="WPF-UI" Version="4.3.0" />

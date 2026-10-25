@@ -7,7 +7,7 @@ using System.Windows;
 namespace BloodborneLauncher.Core
 {
     /// <summary>
-    /// Clipboard.SetText throws CLIPBRD_E_CANT_OPEN while another program (Discord, a clipboard
+    /// Clipboard.SetText throws CLIPBRD_E_CANT_OPEN while another program (a clipboard
     /// manager, a remote desktop) has the clipboard open, sometimes after the text already went in.
     /// Set tries a few times and only reports a failure when the text really isn't there.
     /// </summary>

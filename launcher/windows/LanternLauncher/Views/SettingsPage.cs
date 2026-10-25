@@ -189,64 +189,13 @@ namespace BloodborneLauncher.Views
 
             Group(L.T("Share settings"));
             Add(Card(SymbolRegular.Share24, L.T("Share your settings"),
-                L.T("Graphics, effects, camera, controls, cheats and engine options, as a code to paste in Discord or a file. ") +
+                L.T("Graphics, effects, camera, controls, cheats and engine options, as a code or file. ") +
                 L.T("Not included: display and HDR, the online account, folders and languages"),
                 Row(SmallButton(L.T("Copy code"), SymbolRegular.Copy24, (_, _) => CopySettingsCode()),
                     SmallButton(L.T("Save as file"), SymbolRegular.Save24, (_, _) => SaveSettingsFile())), out _));
             Add(Card(SymbolRegular.ArrowImport24, L.T("Import settings"), L.T("Someone's code or file. You see what changes before anything is applied"),
                 Row(SmallButton(L.T("Paste code"), SymbolRegular.ClipboardPaste24, (_, _) => ImportSettingsCode()),
                     SmallButton(L.T("Open file"), SymbolRegular.FolderOpen24, (_, _) => ImportSettingsFile())), out _));
-
-            Group(L.T("Community"));
-            // Discord status: a preview of the card, and for Custom every part Discord lets a game set.
-            var discordPreview = new DiscordPreview();
-            var discordCustom = new StackPanel();
-            var discordLink = new StackPanel();
-            var discordOwn = new StackPanel();
-            void DiscordChanged()
-            {
-                var mode = S.Str("discord_status");
-                discordCustom.IsVisible = mode == "custom";
-                discordLink.IsVisible = S.Str("discord_picture") == "url";
-                discordOwn.IsVisible = S.Str("discord_app") == "own";
-                discordPreview.Show(DiscordPresence.LookOf(S));
-                Ws.SaveSoon();
-                MainWindow.Instance?.UpdateDiscord();
-            }
-            TextBox DiscordText(string title, string placeholder, string key, string? hint = null) =>
-                TextRow(SymbolRegular.TextDescription24, title, hint, placeholder, () => S.Str(key),
-                    v => { S.Set(key, v); DiscordChanged(); }, discordCustom, 380);
-            SettingCombo(SymbolRegular.PeopleCommunity24, L.T("Discord status"),
-                L.T("Shows that you're playing on your Discord profile while the game runs. Custom: your own lines, picture and buttons"),
-                Choices.DiscordStatus, "discord_status", changed: DiscordChanged);
-            Body.Children.Add(discordPreview);
-            ComboRow(SymbolRegular.Rename24, L.T("Name"), L.T("The name in bold is the Discord app's. My own Discord app: make one on discord.com/developers with any name and paste its Application ID"),
-                DiscordPresence.Names, () => S.Str("discord_app") is { Length: > 0 } v ? v : "lantern",
-                v => S.Set("discord_app", v), discordCustom, changed: DiscordChanged);
-            TextRow(SymbolRegular.Key24, L.T("Application ID"), L.T("From your app's General Information page"), L.T("e.g. 1234567890123456789"),
-                () => S.Str("discord_app_id"), v => { S.Set("discord_app_id", v); DiscordChanged(); }, discordOwn, 380);
-            TextRow(SymbolRegular.Rename24, L.T("Your app's name"), L.T("Only for the preview: Discord shows the name you gave the app"), "Bloodborne",
-                () => S.Str("discord_app_name"), v => { S.Set("discord_app_name", v); DiscordChanged(); }, discordOwn, 380);
-            discordCustom.Children.Add(discordOwn);
-            DiscordText(L.T("First line"), "Hunting in Yharnam", "discord_details", L.T("{version} shows the launcher's version"));
-            DiscordText(L.T("Second line"), L.T("Optional"), "discord_state");
-            ComboRow(SymbolRegular.Image24, L.T("Picture"), null, DiscordPresence.Pictures, () => S.Str("discord_picture") is { Length: > 0 } v ? v : "logo",
-                v => S.Set("discord_picture", v), discordCustom, changed: DiscordChanged);
-            TextRow(SymbolRegular.Link24, L.T("Picture link"), L.T("An https link to a PNG, JPG or GIF: Discord downloads it, so a file on your PC can't be used"),
-                "https://…", () => S.Str("discord_image_url"), v => { S.Set("discord_image_url", v); DiscordChanged(); }, discordLink, 380);
-            discordCustom.Children.Add(discordLink);
-            DiscordText(L.T("Picture hover text"), "Lantern Engine", "discord_image_text");
-            DiscordText(L.T("Small badge link"), L.T("Optional https link"), "discord_badge_url", L.T("A small round picture on the corner of the big one"));
-            DiscordText(L.T("Badge hover text"), L.T("Optional"), "discord_badge_text");
-            ToggleRow(SymbolRegular.Timer24, L.T("Show play time"), null, () => S.Bool("discord_timer"), v => S.Set("discord_timer", v), discordCustom, DiscordChanged);
-            DiscordText(L.T("Button 1 text"), L.T("Optional, e.g. Join my Discord"), "discord_button1_label", L.T("Other people see the buttons; Discord hides them on your own profile"));
-            DiscordText(L.T("Button 1 link"), "https://…", "discord_button1_url");
-            DiscordText(L.T("Button 2 text"), L.T("Optional"), "discord_button2_label");
-            DiscordText(L.T("Button 2 link"), "https://…", "discord_button2_url");
-            Body.Children.Add(discordCustom);
-            DiscordChanged();
-            Add(Card(SymbolRegular.PeopleCommunity24, "Discord", L.T("Help, news, co-op partners and beta feedback"),
-                SmallButton(L.T("Join"), SymbolRegular.Open24, (_, _) => Ui.OpenLink(LauncherSettings.Discord)), out _));
 
             Group(L.T("Updates"));
             _updateNow = SmallButton(L.T("Update now"), SymbolRegular.ArrowDownload24, async (_, _) => await MainWindow.Instance!.InstallUpdateAsync(),
@@ -516,8 +465,8 @@ namespace BloodborneLauncher.Views
                 Ws.Log(L.T("Could not copy: another program is using the clipboard. Try again, or use Save settings file."), LogLevel.Warn);
                 return;
             }
-            Ws.Log(L.T("Settings code copied. Paste it in Discord; others import it in Settings › Share settings."), LogLevel.Good);
-            Prompt.Tell(L.T("Settings code copied"), L.T("Paste it in Discord or anywhere else. Others use Import settings › Paste code."));
+            Ws.Log(L.T("Settings code copied. Share it with someone; they can import it in Settings › Share settings."), LogLevel.Good);
+            Prompt.Tell(L.T("Settings code copied"), L.T("Share it with someone. Others use Import settings › Paste code."));
         }
 
         private void SaveSettingsFile()

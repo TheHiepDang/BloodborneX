@@ -35,8 +35,6 @@
     <EmbeddedResource Include="..\BloodborneLauncher\lantern-stable.ico" LogicalName="lantern-stable.ico" />
     <EmbeddedResource Include="..\BloodborneLauncher\lantern-j3loo.ico" LogicalName="lantern-j3loo.ico" />
     <EmbeddedResource Include="..\BloodborneLauncher\Localization\*.json" LogicalName="BloodborneLauncher.Localization.%(Filename)%(Extension)" />
-    <!-- The Discord status preview's picture (Settings › Community). -->
-    <AvaloniaResource Include="..\BloodborneLauncher\Assets\discord-logo.png" Link="Assets\discord-logo.png" />
     <!-- Fluent System Icons (Microsoft, MIT licence), the icon fonts WPF-UI carries: the same icons
          as the WPF launcher, on every platform. -->
     <AvaloniaResource Include="Assets\Fonts\*.ttf" />

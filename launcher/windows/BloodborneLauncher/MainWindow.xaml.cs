@@ -29,7 +29,6 @@ namespace BloodborneLauncher
             ws.Logged += OnLogged;
             ws.Saved += () => SavedText.Text = L.F($"Saved {DateTime.Now:HH:mm:ss}");
             ws.GameStateChanged += UpdatePlayButton;
-            ws.GameStateChanged += UpdateDiscord;
             ws.GameCrashed += OnGameCrashed;
             ws.SignInRefused += OnSignInRefused;
             ws.Initialise();
@@ -429,21 +428,9 @@ namespace BloodborneLauncher
             }
         }
 
-        private DateTime? _gameStartedUtc;
-
-        /// <summary>Discord status: shown while the game runs (Core/DiscordPresence).</summary>
-        public void UpdateDiscord()
-        {
-            var running = Workspace.Current.Game.Running;
-            if (running && _gameStartedUtc == null) _gameStartedUtc = DateTime.UtcNow;
-            if (!running) _gameStartedUtc = null;
-            DiscordPresence.Update(Workspace.Current.Settings, running, _gameStartedUtc);
-        }
-
         private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
             Workspace.Current.SaveNow();
-            DiscordPresence.Stop();
             if (_closing || !Workspace.Current.Game.Running)
                 return;
 
@@ -863,7 +850,7 @@ namespace BloodborneLauncher
             if (!HuntersDream.OnlinePaused && ini.Get("online_enabled") == "1" && ini.Get("online_pool") != "huntersdream")
             {
                 // Online play is The Hunter's Dream's: without its account the engine stays offline.
-                Prompt.Tell(L.T("Online"), L.T("Connect your Hunter's Dream account on the Online page first (with Discord, or without it).") +
+                Prompt.Tell(L.T("Online"), L.T("Connect your Hunter's Dream account on the Online page first.") +
                                       L.T("\n\nOr turn \"Play online\" off to play offline."));
                 Show("online");
                 return;
@@ -933,7 +920,7 @@ namespace BloodborneLauncher
             var (outW, outH) = Choices.OutputSize(ini.Get("output_res", "1920x1080"));
             // With a 1920 × 1080 output, such a patch makes the game draw at its size itself: the
             // upscaler then runs at 1:1 (DLAA whatever the preset) and in-game preset changes crashed
-            // (Discord, 3440 × 1440). Its size as the output resolution keeps the shape and lets the
+            // (3440 × 1440). Its size as the output resolution keeps the shape and lets the
             // presets work: offered once per set of patches.
             if ((outW, outH) == (1920, 1080) &&
                 Patches.ResolutionSetting(GameEnvironment.PatchesDir(s)) is { Count: > 0 } native &&

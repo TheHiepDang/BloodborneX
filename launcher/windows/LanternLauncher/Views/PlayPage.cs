@@ -75,24 +75,6 @@ namespace BloodborneLauncher.Views
             _engineCard.Margin = new Thickness(0, 12, 0, 0);
             Body.Children.Add(_engineCard);
 
-            // The community: help, news and people to play with. Hidden for good with the X
-            // (Settings keeps the link).
-            if (!S.Bool("discord_hidden"))
-            {
-                SettingRow? discord = null;
-                discord = Card(SymbolRegular.PeopleCommunity24, L.T("Join the Discord"),
-                    L.T("Help, news, co-op partners and beta feedback"), Row(
-                        SmallButton(L.T("Join"), SymbolRegular.Open24, (_, _) => Ui.OpenLink(LauncherSettings.Discord), ControlAppearance.Primary),
-                        IconButton(SymbolRegular.Dismiss24, L.T("Hide"), (_, _) =>
-                        {
-                            S.Set("discord_hidden", true);
-                            Ws.SaveSoon();
-                            Body.Children.Remove(discord!);
-                        })), out _);
-                discord.Margin = new Thickness(0, 12, 0, 0);
-                Body.Children.Add(discord);
-            }
-
             // ==================== Game ====================
             Group(L.T("Game"));
             var gameCard = Card(SymbolRegular.Folder24, L.T("Game folder"), "", Row(

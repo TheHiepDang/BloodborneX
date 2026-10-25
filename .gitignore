@@ -1,4 +1,4 @@
-﻿# Build output
+# Build output
 bin/
 obj/
 out/
@@ -10,10 +10,24 @@ dist/
 .vs/
 .idea/
 launcher/windows/install.txt
-/tools/
+/tools/*
+!/tools/build-nr-release.ps1
+!/tools/nr-release-default.ini
+!/tools/copy-nr-notices.ps1
+!/tools/build-release-engine.sh
+!/tools/start-release.ps1
+!/tools/verify-nr-release.ps1
+!/tools/test-nr-release.ps1
+!/tools/nr-start-here.template.md
+!/tools/install-streamline.ps1
+!/tools/Install Streamline.cmd
 
 # User-supplied proprietary NR model: never commit or redistribute.
 /dlss/nvngx_dlssnr.dll
 
 # Optional per-GPU user-supplied NR runtime slots.
 /dlss/**/nvngx_dlssnr.dll
+
+# Local release-builder configuration and intermediates.
+/.release-settings.json
+/.release-work/

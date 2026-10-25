@@ -1,16 +1,23 @@
 # BloodborneX
 
-BloodborneX is a direct fork of [Awakenchan's Lantern Engine](https://github.com/Awakenchan/LanternEngine), adding experimental native Vulkan DLSS Neural Rendering on Windows. The original launcher and engine work are by Awakenchan and the upstream contributors.
+BloodborneX builds on [Awakenchan's Lantern Engine](https://github.com/Awakenchan/LanternEngine), with its own experimental native Vulkan Neural Rendering and frame-generation work on Windows. The original launcher and engine work remain credited to Awakenchan and upstream contributors.
 
 **No game files are included.** You need your own decrypted Bloodborne dump (CUSA03173) with update 1.09.
 
 ## Install
 
 1. Download the Windows package from the [latest release](https://github.com/TheHiepDang/BloodborneX/releases/latest) and unzip it.
-2. Supply your own runtime at **`dlss/nvngx_dlssnr.dll`**. Choose the unmodified October 16 DLL for **GeForce RTX 50-series**, or the **openNR FP16 compatibility** DLL for other RTX cards. Install one DLL directly in `dlss/`; the engine detects the GPU for runtime handling. The DLL is **not included**. See [accepted builds and hashes](docs/NR-RELEASE.md).
-3. Run `Lantern Engine.exe`, select your game folder, and press **Play**. Enable Neural Rendering in the DLSS settings (Insert or L3 + R3).
+2. If using Neural Rendering, supply your own runtime at **`dlss/nvngx_dlssnr.dll`**. Choose the unmodified October 16 DLL for **GeForce RTX 50-series**, or the **openNR FP16 compatibility** DLL for other RTX cards. Install one DLL directly in `dlss/`; the engine detects the GPU for runtime handling. The DLL is **not included**. See [accepted builds and hashes](docs/NR-RELEASE.md).
+3. If testing DLSS Frame Generation, run `Install Streamline.cmd` in the extracted package. It downloads and verifies the complete NVIDIA Streamline 2.14.16 runtime. See the [HDR test instructions](docs/DLSS-FG-HDR-PRERELEASE.md).
+4. Run `Lantern Engine.exe`, select your game folder, and press **Play**. Enable Neural Rendering or DLSS Frame Generation in the graphics settings as desired.
 
 See [release notes](docs/NR-RELEASE.md) for requirements and limitations, or the [development handoff](docs/DLSSNR-HANDOFF.md) for technical context.
+
+## Prepare a release
+
+Double-click **Prepare Release.cmd** in the project root. Enter the new version and a short description. The first run also asks for the applied engine source folder (the folder with `build.sh`); it remembers that path locally. PowerShell 7.4+, .NET SDK 8+ and MSYS2 CLANG64 build dependencies are required.
+
+The script compiles the engine and launcher, verifies matching versions and metadata, runs package checks, and creates **`releases/<version>/Upload`**. Upload every file in that folder without renaming anything. It does not publish automatically or replace your game installation. See [release preparation](docs/RELEASING.md).
 
 ## Video showcase
 

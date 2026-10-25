@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory)][string]$EngineSource,
     [string]$Version = '1.0.1',
     [string]$ReleaseNotesFile = 'NR-1.0.1.md',
+    [string]$ReleaseNotesPath = '',
     [string]$MsysRoot = 'C:\msys64',
     [string]$CachedDownloads = '',
     [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\releases')
@@ -15,7 +16,7 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $engine = (Resolve-Path $EngineSource).Path
 $release = Join-Path ([IO.Path]::GetFullPath($ReleaseRoot)) $Version
 if ($Version -notmatch '^\d+\.\d+\.\d+(-nr\.rc\d+)?$') { throw 'Expected a stable version such as 1.0.1 or an NR candidate such as 0.9.9-nr.rc2' }
-$notes = Join-Path $repo ("docs\$ReleaseNotesFile")
+$notes = if ($ReleaseNotesPath) { [IO.Path]::GetFullPath($ReleaseNotesPath) } else { Join-Path $repo ("docs\$ReleaseNotesFile") }
 if (!(Test-Path -LiteralPath $notes -PathType Leaf)) { throw "Missing release notes: $notes" }
 if (Test-Path -LiteralPath $release) { throw "Refusing to overwrite existing release: $release" }
 $bin = Join-Path $MsysRoot 'clang64\bin'
@@ -59,6 +60,8 @@ try {
         '-c','Release','-r','win-x64','--self-contained','true','-p:PublishSingleFile=true',
         '-p:IncludeNativeLibrariesForSelfExtract=true','-p:EnableCompressionInSingleFile=true',
         '-p:DebugType=none',"-p:Version=$Version",'-o',$publish,'--nologo')
+    $actualVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $publish 'Lantern Engine.exe')).ProductVersion
+    if (($actualVersion -split '\+')[0] -ne $Version) { throw "Compiled launcher version $actualVersion does not match requested release $Version" }
     Copy-One (Join-Path $publish 'Lantern Engine.exe') (Join-Path $package 'Lantern Engine.exe')
     foreach ($forward in @(@('BloodbornePlay','play.rc','Bloodborne.exe'), @('LanternForward','forward.rc','Bloodborne Launcher.exe'))) {
         Push-Location (Join-Path $repo "launcher\windows\$($forward[0])")
@@ -87,6 +90,8 @@ try {
     Copy-One (Join-Path $engine 'scripts\image_109_hashes.txt') (Join-Path $package 'engine\scripts\image_109_hashes.txt')
     Copy-One (Join-Path $PSScriptRoot 'nr-release-default.ini') (Join-Path $package 'lantern.ini')
     Copy-One (Join-Path $PSScriptRoot 'nr-release-default.ini') (Join-Path $package 'engine\lantern.default.ini')
+    Copy-One (Join-Path $PSScriptRoot 'Install Streamline.cmd') (Join-Path $package 'Install Streamline.cmd')
+    Copy-One (Join-Path $PSScriptRoot 'install-streamline.ps1') (Join-Path $package 'tools\Install Streamline.ps1')
     # Resolve the native dependency closure rather than assuming MSYS2 is installed on the player PC.
     $queue = [Collections.Generic.Queue[string]]::new()
     Get-ChildItem $package -Recurse -File | Where-Object Extension -In '.exe','.dll' | ForEach-Object { $queue.Enqueue($_.FullName) }
@@ -123,10 +128,15 @@ try {
     Copy-Item -LiteralPath (Join-Path $engine 'licenses') -Destination (Join-Path $package 'licenses\engine') -Recurse
     Copy-Item -LiteralPath (Join-Path $MsysRoot 'clang64\share\licenses') -Destination (Join-Path $package 'licenses\msys2-clang64') -Recurse
     & (Join-Path $PSScriptRoot 'copy-nr-notices.ps1') -EngineSource $engine -Package $package
-    foreach ($name in @('DLSSNR-HANDOFF.md','NR-RC1.md','NR-RC2.md','NR-RELEASE.md','RELEASING.md',$ReleaseNotesFile)) {
+    foreach ($name in @('DLSSNR-HANDOFF.md','NR-RC1.md','NR-RC2.md','RELEASING.md')) {
         Copy-One (Join-Path $repo "docs\$name") (Join-Path $package "docs\$name")
     }
-    Copy-One (Join-Path $repo 'docs\NR-RELEASE.md') (Join-Path $package 'START-HERE.md')
+    $startText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'nr-start-here.template.md')).Replace('{{VERSION}}',$Version).Replace('{{BUILD_DATE}}',[DateTimeOffset]::UtcNow.ToString('yyyy-MM-dd')+' UTC')
+    $releaseKind = if ($Version.Contains('-nr.rc')) { 'prerelease' } else { 'stable release' }
+    $startText = $startText.Replace('{{RELEASE_KIND}}',$releaseKind)
+    [IO.File]::WriteAllText((Join-Path $package 'START-HERE.md'),$startText,[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $package 'docs\NR-RELEASE.md'),$startText,[Text.UTF8Encoding]::new($false))
+    Copy-One $notes (Join-Path $package "docs\NR-$Version.md")
     [IO.File]::WriteAllText((Join-Path $package 'LOCAL-NR-RELEASE'), "$Version`nUpdates require compatible full packages from TheHiepDang/BloodborneX.`n")
     @{version=$Version;engine="lantern-native-nr-$Version";update_family='bloodbornex-native-nr-v1';repository='TheHiepDang/BloodborneX'} |
         ConvertTo-Json | Set-Content (Join-Path $package 'package.json') -Encoding utf8
@@ -134,7 +144,7 @@ try {
     Copy-One (Join-Path $repo 'README.md') (Join-Path $package 'README.md')
     Copy-One $notes (Join-Path $package 'RELEASE-NOTES.md')
     Copy-One $notes (Join-Path $release 'RELEASE-NOTES.md')
-    $supplemental = @('frame-generation-memory-fix.patch','nr-runtime-compatibility-fix.patch') | ForEach-Object {
+    $supplemental = @('frame-generation-memory-fix.patch','nr-runtime-compatibility-fix.patch','dlss-fg-hdr-test.patch') | ForEach-Object {
         @{name=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $repo "engine\$_")).Hash}
     }
 
@@ -144,10 +154,10 @@ try {
         engine_upstream='https://github.com/DarkIzuku/bloodborne_pc'; engine_base='8ecba9a4abdd54747e31d7fee54982e422b5f8e2';
         engine_patch_sha256=(Get-FileHash (Join-Path $repo 'engine\bbhost-changes.patch')).Hash;
         supplemental_engine_patches=@($supplemental); applied_engine_snapshot='LanternEngine-source/engine-source';
-        fixes=@('FSR FG transient allocation retirement','RTX 50 original NR runtime selection','NR Performance model scaling','Consistent stable release version and updater assets');
+        fixes=@('FSR FG transient allocation retirement','RTX 50 original NR runtime selection','NR Performance model scaling','DLSS-G HDR presenter input','Complete Streamline runtime installer','Discord features removed');
         tested_engine_outputs=$engineHashes; downloads=$script:downloads;
         nr_runtime_included=$false; startup='bundled Python; native bb-start intentionally omitted';
-        optional_assets_omitted=@('Streamline/DLSS-G','FSR4/FSR4.1.1','bbbridge online helper');
+        optional_assets_omitted=@('Streamline binaries (install from pinned NVIDIA SDK with Install Streamline.cmd)','FSR4/FSR4.1.1','bbbridge online helper');
         toolchain=(& (Join-Path $bin 'clang.exe') --version | Select-Object -First 1)
     }
     $provenance | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $package 'BUILD-PROVENANCE.json') -Encoding utf8
@@ -160,20 +170,30 @@ try {
         } else {
             # Applied source snapshots are supported without creating a repository.
             # Filter again below, independently of ignore files or rg glob ordering.
-            $listed = & rg --files --hidden --no-ignore $From
-            if ($LASTEXITCODE -gt 1) { throw "Cannot enumerate source snapshot $From" }
-            $files = foreach ($absolute in $listed) {
-                $relative = [IO.Path]::GetRelativePath($From,$absolute).Replace('\','/')
-                if ($relative -match '(^|/)(\.git|\.vs|\.idea|\.agents|\.codex|out|bin|obj|build|pgo|user|logs|dist|test-temp|__pycache__|\.pytest_cache|fsr4_shaders|fsr4_411)(/|$)' -or
-                    $relative -match '^(1060|docs/savedata_route|launcher-windows)/' -or
-                    $relative -match '(^|/)(bbport\.ini|lantern\.ini|mods\.json|patches\.json|game_dir\.txt|prepared\.json|message[^/]*\.txt|perf\.data|vkd3d-proton\.cache)$' -or
-                    $relative -match '\.(dll|exe|pdb|dmp|log|orig|bak|old|obj|o|a|lib|zip|7z|mp4|cache|pyc)$') { continue }
-                $relative
+            $pending = [Collections.Generic.Stack[string]]::new()
+            $pending.Push($From)
+            $files = [Collections.Generic.List[string]]::new()
+            $excludedFolders = '(^|/)(\.git|\.vs|\.idea|\.agents|\.codex|\.release-work|releases|out|bin|obj|build|pgo|user|logs|dist|test-temp|__pycache__|\.pytest_cache|fsr4_shaders|fsr4_411)(/|$)'
+            while ($pending.Count) {
+                $current = $pending.Pop()
+                foreach ($directory in [IO.Directory]::EnumerateDirectories($current)) {
+                    $relative = [IO.Path]::GetRelativePath($From,$directory).Replace('\','/')
+                    if ($relative -match $excludedFolders -or $relative -match '^(1060|docs/savedata_route|launcher-windows)(/|$)' -or
+                        $directory -eq $release -or $directory.StartsWith($release+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -or
+                        ([IO.File]::GetAttributes($directory) -band [IO.FileAttributes]::ReparsePoint)) { continue }
+                    $pending.Push($directory)
+                }
+                foreach ($absolute in [IO.Directory]::EnumerateFiles($current)) {
+                    $relative = [IO.Path]::GetRelativePath($From,$absolute).Replace('\','/')
+                    if ($relative -match '(^|/)(\.release-settings\.json|bbport\.ini|lantern\.ini|mods\.json|patches\.json|game_dir\.txt|prepared\.json|message[^/]*\.txt|perf\.data|vkd3d-proton\.cache)$' -or
+                        $relative -match '\.(dll|exe|pdb|dmp|log|orig|bak|old|obj|o|a|lib|zip|7z|mp4|cache|pyc)$') { continue }
+                    $files.Add($relative)
+                }
             }
         }
         foreach ($relative in $files | Select-Object -Unique) {
             $file = Join-Path $From $relative
-            if ((Test-Path -LiteralPath $file -PathType Leaf) -and $relative -notmatch '(^|/)(nvngx_dlssnr\.dll|releases)(/|$)') {
+            if ((Test-Path -LiteralPath $file -PathType Leaf) -and !$file.StartsWith($release+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -and $relative -notmatch '(^|/)(nvngx_dlssnr\.dll|releases)(/|$)') {
                 Copy-One $file (Join-Path $To $relative)
             }
         }
@@ -183,7 +203,7 @@ try {
     foreach ($submodule in @('gpu/third_party/fsr-vulkan','gpu/third_party/imgui','third_party/LibAtrac9')) {
         Copy-GitSource (Join-Path $engine $submodule) (Join-Path $source "engine-source/$submodule")
     }
-    foreach ($helper in @('build-nr-release.ps1','nr-release-default.ini','copy-nr-notices.ps1')) {
+    foreach ($helper in @('build-nr-release.ps1','nr-release-default.ini','copy-nr-notices.ps1','build-release-engine.sh','start-release.ps1','verify-nr-release.ps1','test-nr-release.ps1','nr-start-here.template.md','install-streamline.ps1','Install Streamline.cmd')) {
         Copy-One (Join-Path $PSScriptRoot $helper) (Join-Path $source "BloodborneX/tools/$helper")
     }
     @'
@@ -195,13 +215,15 @@ That cumulative legacy patch is retained as historical context; the applied
 snapshot is authoritative for this release. See BUILD-PROVENANCE.json.
 
 Build engine-source/build.sh with the documented MSYS2 CLANG64 dependencies.
-The launcher source is BloodborneX/launcher/windows. No game or NR runtime is
-included. Packaging scripts are in BloodborneX/tools.
+The launcher source is BloodborneX/launcher/windows. No game, NR runtime or
+Streamline binaries are included. The portable package has an installer that
+downloads a pinned NVIDIA Streamline SDK for users choosing DLSS-G.
+Packaging scripts are in BloodborneX/tools.
 '@ | Set-Content -LiteralPath (Join-Path $source 'BUILD-FROM-SNAPSHOT.md') -Encoding utf8
     Copy-One (Join-Path $package 'BUILD-PROVENANCE.json') (Join-Path $source 'BUILD-PROVENANCE.json')
     # The only binaries allowed in the portable tree are explicitly built/copied above.
     $forbidden = Get-ChildItem $package,$source -Recurse -File | Where-Object {
-        $_.Name -match '^(nvngx_dlssnr\.dll|eboot\..*|boot.*\.bin|prepared\.json|game_dir\.txt|msys-2\.0\.dll)$' -or
+        $_.Name -match '^(nvngx_dlssnr\.dll|nvngx_dlssg\.dll|NvLowLatencyVk\.dll|sl\..*\.dll|eboot\..*|boot.*\.bin|prepared\.json|game_dir\.txt|msys-2\.0\.dll)$' -or
         $_.Extension -in '.pdb','.dmp','.log','.orig','.bak','.old'
     }
     if ($forbidden) { throw "Forbidden release content: $($forbidden[0].FullName)" }
