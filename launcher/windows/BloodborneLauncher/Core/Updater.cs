@@ -180,6 +180,7 @@ namespace BloodborneLauncher.Core
                 return null;
 
             string? exe = null, zip = null, package = null;
+            var brandedZip = false;
             long exeSize = 0, zipSize = 0;
             foreach (var asset in root.GetProperty("assets").EnumerateArray())
             {
@@ -192,10 +193,17 @@ namespace BloodborneLauncher.Core
                 if (spaced.Equals(ExeName, StringComparison.OrdinalIgnoreCase) ||
                     (exe == null && spaced.Equals(OldExeName, StringComparison.OrdinalIgnoreCase)))
                     (exe, exeSize) = (url, size);
-                else if ((name.StartsWith("LanternEngine-", StringComparison.OrdinalIgnoreCase) ||
-                          name.StartsWith("BloodbornePC-", StringComparison.OrdinalIgnoreCase)) &&
-                         name.EndsWith("-win64.zip", StringComparison.OrdinalIgnoreCase) && zip == null)
-                    (zip, zipSize) = (url, size);
+                else if (name.EndsWith("-win64.zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    var bloodborneX = name.StartsWith("BloodborneX-", StringComparison.OrdinalIgnoreCase);
+                    var legacy = name.StartsWith("LanternEngine-", StringComparison.OrdinalIgnoreCase) ||
+                                 name.StartsWith("BloodbornePC-", StringComparison.OrdinalIgnoreCase);
+                    if ((bloodborneX || legacy) && (zip == null || (bloodborneX && !brandedZip)))
+                    {
+                        (zip, zipSize) = (url, size);
+                        brandedZip = bloodborneX;
+                    }
+                }
                 else if (name.Equals(PackageFile, StringComparison.OrdinalIgnoreCase))
                     package = url;
             }

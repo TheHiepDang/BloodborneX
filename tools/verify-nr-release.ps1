@@ -1,6 +1,7 @@
 #Requires -Version 7.4
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Release,[Parameter(Mandatory)][string]$Version,[Parameter(Mandatory)][string]$ExpectedEngineHash)
+param([Parameter(Mandatory)][string]$Release,[Parameter(Mandatory)][string]$Version,[Parameter(Mandatory)][string]$ExpectedEngineHash,
+      [ValidateSet('LanternEngine','BloodborneX')][string]$ArtifactPrefix='LanternEngine')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $root=(Resolve-Path -LiteralPath $Release).Path
@@ -14,6 +15,9 @@ $info=[Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
 Check (($info.ProductVersion -split '\+')[0] -eq $Version -and ([version]$info.FileVersion).ToString(3) -eq ($Version -split '-')[0]) 'Compiled launcher version matches metadata and release tag'
 Check ((Get-FileHash -LiteralPath (Join-Path $package 'engine\out\bb-probe.exe')).Hash -eq $ExpectedEngineHash) 'Package contains the engine compiled in this run'
 Check ((Get-Content -LiteralPath (Join-Path $package 'LOCAL-NR-RELEASE') -First 1) -eq $Version) 'NR marker matches the release version'
+Check ((Test-Path -LiteralPath (Join-Path $package 'NOTICE') -PathType Leaf) -and
+       (Get-Content -LiteralPath (Join-Path $package 'NOTICE') -Raw).Contains('Lantern Engine by Awaken (https://github.com/Awakenchan/LanternEngine)') -and
+       (Test-Path -LiteralPath (Join-Path $package 'licenses\GPL-3.0.txt') -PathType Leaf)) 'Upstream attribution and GPL-3.0 terms are included'
 Check ((Test-Path -LiteralPath (Join-Path $package 'Install Streamline.cmd') -PathType Leaf) -and
        (Test-Path -LiteralPath (Join-Path $package 'tools\Install Streamline.ps1') -PathType Leaf)) 'Streamline repair helper is included'
 $streamlineOut=Join-Path $package 'engine\out'
@@ -32,7 +36,7 @@ foreach ($name in $streamlineFiles) {
 Check (@(Get-ChildItem -LiteralPath $streamlineOut -File -Filter 'sl.*.dll' |
          Where-Object { $_.Name -notin $streamlineFiles }).Count -eq 0) 'No extra Streamline plugin is packaged'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$expectedArchives=@("LanternEngine-$Version-win64.zip","LanternEngine-$Version-source.zip")
+$expectedArchives=@("$ArtifactPrefix-$Version-win64.zip","$ArtifactPrefix-$Version-source.zip")
 $checksumLines=@(Get-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt'))
 Check ($checksumLines.Count -eq 2) 'Exactly two archive checksums'
 foreach ($line in $checksumLines) {

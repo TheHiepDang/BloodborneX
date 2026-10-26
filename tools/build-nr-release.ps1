@@ -8,6 +8,7 @@ param(
     [string]$ReleaseNotesPath = '',
     [string]$MsysRoot = 'C:\msys64',
     [string]$CachedDownloads = '',
+    [ValidateSet('LanternEngine','BloodborneX')][string]$ArtifactPrefix = 'LanternEngine',
     [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\releases')
 )
 $ErrorActionPreference = 'Stop'
@@ -131,7 +132,9 @@ try {
     $srLicense = Download 'https://raw.githubusercontent.com/NVIDIA/DLSS/v310.9.1/LICENSE.txt' 'NVIDIA-DLSS-LICENSE.txt'
     Copy-One $srLicense (Join-Path $package 'licenses\NVIDIA-DLSS-LICENSE.txt')
     Copy-One (Join-Path $pythonDir 'LICENSE.txt') (Join-Path $package 'licenses\Python-LICENSE.txt')
-    Copy-One (Join-Path $repo 'LICENSE') (Join-Path $package 'licenses\Lantern-GPL-2.0.txt')
+    Copy-One (Join-Path $repo 'LICENSE') (Join-Path $package 'licenses\GPL-2.0-legacy.txt')
+    Copy-One (Join-Path $repo 'licenses\GPL-3.0.txt') (Join-Path $package 'licenses\GPL-3.0.txt')
+    Copy-One (Join-Path $repo 'NOTICE') (Join-Path $package 'NOTICE')
     Copy-Item -LiteralPath (Join-Path $engine 'licenses') -Destination (Join-Path $package 'licenses\engine') -Recurse
     Copy-Item -LiteralPath (Join-Path $MsysRoot 'clang64\share\licenses') -Destination (Join-Path $package 'licenses\msys2-clang64') -Recurse
     & (Join-Path $PSScriptRoot 'copy-nr-notices.ps1') -EngineSource $engine -Package $package
@@ -156,7 +159,7 @@ try {
     }
 
     $provenance = [ordered]@{
-        version=$Version; created_utc=[DateTime]::UtcNow.ToString('o');
+        version=$Version; artifact_prefix=$ArtifactPrefix; created_utc=[DateTime]::UtcNow.ToString('o');
         repository_head=(& git -C $repo rev-parse HEAD); dirty_source=$true;
         engine_upstream='https://github.com/DarkIzuku/bloodborne_pc'; engine_base='8ecba9a4abdd54747e31d7fee54982e422b5f8e2';
         engine_patch_sha256=(Get-FileHash (Join-Path $repo 'engine\bbhost-changes.patch')).Hash;
@@ -243,7 +246,7 @@ Packaging scripts are in BloodborneX/tools.
         $manifest | Set-Content (Join-Path $tree 'FILES-SHA256.txt') -Encoding utf8
     }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    foreach ($entry in @(@($package,"LanternEngine-$Version-win64.zip"), @($source,"LanternEngine-$Version-source.zip"))) {
+    foreach ($entry in @(@($package,"$ArtifactPrefix-$Version-win64.zip"), @($source,"$ArtifactPrefix-$Version-source.zip"))) {
         [IO.Compression.ZipFile]::CreateFromDirectory($entry[0],(Join-Path $release $entry[1]),[IO.Compression.CompressionLevel]::Optimal,$true)
     }
     Get-ChildItem $release -File -Filter '*.zip' | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName).Hash,$_.Name } |

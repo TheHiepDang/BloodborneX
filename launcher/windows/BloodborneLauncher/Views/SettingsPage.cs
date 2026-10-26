@@ -244,6 +244,11 @@ namespace BloodborneLauncher.Views
                 Add(build);
             }
 
+            Group("About BloodborneX");
+            Add(Card(SymbolRegular.DocumentSettings20, "Modified fork",
+                "Lantern Engine by Awaken (https://github.com/Awakenchan/LanternEngine). BloodborneX is independently modified and is not an official Lantern Engine release.",
+                null, out _));
+
             Ws.PortChanged += Refresh;
         }
 

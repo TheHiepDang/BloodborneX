@@ -42,6 +42,22 @@ using var stableDocument = JsonDocument.Parse("""
 """);
 var stableRelease=(Updater.Release)parse.Invoke(null,new object[]{stableDocument.RootElement})!;
 Check(stableRelease.Version==new Version(1,0,1) && stableRelease.Beta==0 && stableRelease.ZipUrl=="https://invalid/windows-1.0.1" && stableRelease.PackageUrl=="https://invalid/package-1.0.1","Published stable assets selected");
+using var transitionDocument = JsonDocument.Parse("""
+{"tag_name":"v1.0.2-nr.rc7","html_url":"https://github.com/TheHiepDang/BloodborneX/releases/tag/v1.0.2-nr.rc7","assets":[
+ {"name":"LanternEngine-1.0.2-nr.rc7-win64.zip","browser_download_url":"https://invalid/legacy","size":456},
+ {"name":"BloodborneX-1.0.2-nr.rc7-win64.zip","browser_download_url":"https://invalid/branded","size":789},
+ {"name":"package.json","browser_download_url":"https://invalid/package","size":123}]}
+""");
+var transition=(Updater.Release)parse.Invoke(null,new object[]{transitionDocument.RootElement})!;
+Check(transition.ZipUrl=="https://invalid/branded" && transition.ZipSize==789,
+    "BloodborneX asset preferred when both names are present");
+using var brandedDocument = JsonDocument.Parse("""
+{"tag_name":"v1.0.3","html_url":"https://github.com/TheHiepDang/BloodborneX/releases/tag/v1.0.3","assets":[
+ {"name":"BloodborneX-1.0.3-win64.zip","browser_download_url":"https://invalid/bloodbornex","size":789},
+ {"name":"package.json","browser_download_url":"https://invalid/package","size":123}]}
+""");
+var branded=(Updater.Release)parse.Invoke(null,new object[]{brandedDocument.RootElement})!;
+Check(branded.ZipUrl=="https://invalid/bloodbornex","Future BloodborneX-only asset selected");
 Check(Updater.NrMetadataCompatible(new JsonObject { ["version"]="1.0.1",["update_family"]=Updater.UpdateFamily,["engine"]="lantern-native-nr-1.0.1" }),"Published stable NR metadata");
 var marker = Path.Combine(AppContext.BaseDirectory,"LOCAL-NR-RELEASE");
 Check(!File.Exists(marker), "Test output must not already contain a release marker");

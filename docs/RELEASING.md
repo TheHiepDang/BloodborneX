@@ -8,6 +8,14 @@ The script always runs native compilation, launcher compilation and checks. It r
 
 The finished files are in `releases/<version>/Upload`. Upload **every file from that folder together**. `UPLOAD-INSTRUCTIONS.txt` beside it records the exact tag and release type. The script does not upload, create a tag, push code, modify an installed game or change user settings.
 
+The DLSS-G HDR prerelease and the immediately following release keep the legacy
+`LanternEngine-` archive prefix so installed 1.0.1 launchers can discover them.
+Their launcher recognizes both that prefix and `BloodborneX-`. For the later
+branding switch, build with `-ArtifactPrefix BloodborneX`. An older launcher that
+skips both transition releases may need a manual update after the switch. The
+legacy filename does not make this fork an official upstream release; keep the
+upstream NOTICE, exact attribution and changed-version statement visible.
+
 The builder downloads NVIDIA's pinned Streamline 2.14.16 SDK, verifies its archive
 hash, and packages the seven matched production DLLs with their licence texts and
 per-file manifest. DLSS Frame Generation needs no separate installation after a
@@ -24,7 +32,7 @@ Requirements: Windows, PowerShell 7.4+, .NET SDK 8+, Git, and the existing MSYS2
 & '.\Prepare Release.ps1' -Version 1.0.2 -EngineSource 'C:\path\to\engine' -CheckOnly -NoPrompt
 ```
 
-Optional arguments include `-ReleaseNotesPath`, `-MsysRoot`, `-CachedDownloads`, `-ReleaseRoot`, `-BuildDrive` and `-Jobs`. `-CheckOnly` checks inputs/tools without compiling or writing configuration. A supplied notes file is used verbatim. Otherwise a short versioned note is generated. Downloads are reused from earlier release caches when available; pinned Python/DLSS SR hashes are still checked.
+Optional arguments include `-ReleaseNotesPath`, `-MsysRoot`, `-CachedDownloads`, `-ArtifactPrefix`, `-ReleaseRoot`, `-BuildDrive` and `-Jobs`. `-CheckOnly` checks inputs/tools without compiling or writing configuration. A supplied notes file is used verbatim. Otherwise a short versioned note is generated. Downloads are reused from earlier release caches when available; pinned Python/DLSS SR hashes are still checked.
 
 The lower-level `tools/build-nr-release.ps1` packages already-built outputs. Prefer the root script for routine releases because it compiles first and validates the result. `tools/verify-nr-release.ps1` checks embedded version, exact external/internal metadata, fresh-engine hash, both archive checksums, every archived file hash, full manifest coverage and prohibited files. `tools/test-nr-release.ps1` tests portable startup/imports/render-size preparation and native/GPU capability loading without launching the game. Validation reports describe only checks actually performed.
 

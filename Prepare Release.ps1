@@ -6,6 +6,7 @@ param(
     [string]$MsysRoot,
     [string]$ReleaseNotesPath,
     [string]$CachedDownloads,
+    [ValidateSet('LanternEngine','BloodborneX')][string]$ArtifactPrefix = 'LanternEngine',
     [string]$ReleaseRoot = (Join-Path $PSScriptRoot 'releases'),
     [ValidatePattern('^[D-Zd-z]$')][string]$BuildDrive = 'N',
     [ValidateRange(1,64)][int]$Jobs = 4,
@@ -73,7 +74,7 @@ if (!$CachedDownloads) {
         Where-Object { Test-Path -LiteralPath (Join-Path $_ 'python-3.13.17-embeddable-amd64.zip') } | Select-Object -First 1
 }
 if ($ReleaseNotesPath -and !(Test-Path -LiteralPath $ReleaseNotesPath -PathType Leaf)) { throw "Release notes not found: $ReleaseNotesPath" }
-$details = [pscustomobject]@{ Version=$Version; Tag="v$Version"; EngineSource=$engine; Release=$release; BuildDrive=$BuildDrive; MsysRoot=$MsysRoot }
+$details = [pscustomobject]@{ Version=$Version; Tag="v$Version"; ArtifactPrefix=$ArtifactPrefix; EngineSource=$engine; Release=$release; BuildDrive=$BuildDrive; MsysRoot=$MsysRoot }
 if ($CheckOnly) { $details; return }
 $engineOut = Join-Path $engine 'out'
 $running = Get-Process -Name 'bb-probe' -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($engineOut+'\',[StringComparison]::OrdinalIgnoreCase) }
@@ -112,16 +113,16 @@ try {
 }
 $builtHash = (Get-FileHash -LiteralPath (Join-Path $engineOut 'bb-probe.exe')).Hash
 Write-Host '[2/4] Compiling the launcher and packaging a clean release...' -ForegroundColor Cyan
-$arguments = @{ EngineSource=$engine; Version=$Version; ReleaseNotesPath=$ReleaseNotesPath; MsysRoot=$MsysRoot; ReleaseRoot=$ReleaseRoot }
+$arguments = @{ EngineSource=$engine; Version=$Version; ReleaseNotesPath=$ReleaseNotesPath; MsysRoot=$MsysRoot; ReleaseRoot=$ReleaseRoot; ArtifactPrefix=$ArtifactPrefix }
 if ($CachedDownloads) { $arguments.CachedDownloads=$CachedDownloads }
 & (Join-Path $repo 'tools\build-nr-release.ps1') @arguments
 Write-Host '[3/4] Checking versions, archives, metadata and portable startup...' -ForegroundColor Cyan
-& (Join-Path $repo 'tools\verify-nr-release.ps1') -Release $release -Version $Version -ExpectedEngineHash $builtHash
+& (Join-Path $repo 'tools\verify-nr-release.ps1') -Release $release -Version $Version -ExpectedEngineHash $builtHash -ArtifactPrefix $ArtifactPrefix
 & (Join-Path $repo 'tools\test-nr-release.ps1') -Release $release | Out-Host
 Write-Host '[4/4] Preparing the upload folder...' -ForegroundColor Cyan
 $upload = Join-Path $release 'Upload'
 New-Item -ItemType Directory -Path $upload | Out-Null
-foreach ($name in @("LanternEngine-$Version-win64.zip","LanternEngine-$Version-source.zip",'package.json','SHA256SUMS.txt','RELEASE-NOTES.md','VALIDATION.md','PACKAGE-CHECKS.json')) {
+foreach ($name in @("$ArtifactPrefix-$Version-win64.zip","$ArtifactPrefix-$Version-source.zip",'package.json','SHA256SUMS.txt','RELEASE-NOTES.md','VALIDATION.md','PACKAGE-CHECKS.json')) {
     Copy-Item -LiteralPath (Join-Path $release $name) -Destination (Join-Path $upload $name)
 }
 $prerelease = $Version.Contains('-nr.rc')

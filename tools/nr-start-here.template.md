@@ -2,6 +2,9 @@
 
 BloodborneX Windows x64 release, {{BUILD_DATE}}. Version `{{VERSION}}` is this fork's
 version. The launcher, package metadata, ZIP name and release tag agree on it.
+This is an independently modified fork based on Lantern Engine by Awaken (https://github.com/Awakenchan/LanternEngine),
+not an official Lantern Engine release.
+The original NOTICE and licence terms are included with this package.
 
 ## Start here
 

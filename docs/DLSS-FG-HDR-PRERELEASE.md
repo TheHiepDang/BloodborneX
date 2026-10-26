@@ -1,8 +1,11 @@
-# BloodborneX 1.0.2-nr.rc6 — DLSS-G HDR test build
+# BloodborneX 1.0.2-nr.rc7 — DLSS-G HDR test build
 
 This is a prerelease for [issue #2](https://github.com/TheHiepDang/BloodborneX/issues/2).
 It ports Awakenchan's DLSS-G HDR presenter input from commit `08173e6` onto the
 BloodborneX 1.0.1 NR/FSR engine. It is **not HDR gameplay validated yet**.
+BloodborneX is a modified fork based on Lantern Engine by Awaken (https://github.com/Awakenchan/LanternEngine).
+It is not an official Lantern Engine release. The legacy artifact filename is
+retained temporarily for updater compatibility.
 
 ## Install and test
 
