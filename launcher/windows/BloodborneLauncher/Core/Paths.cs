@@ -21,6 +21,15 @@ namespace BloodborneLauncher.Core
         /// it is missing, the new folder is copied back to it once.</summary>
         private static string MigratedConfigDir()
         {
+            // Package validation must never import or migrate an installed player's configuration.
+            // Ordinary launches retain the existing per-user migration below.
+            var isolated = Environment.GetEnvironmentVariable("BLOODBORNEX_CONFIG_DIR");
+            if (!string.IsNullOrWhiteSpace(isolated))
+            {
+                var root = Path.GetFullPath(isolated);
+                Directory.CreateDirectory(root);
+                return root;
+            }
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             var dir = Path.Combine(appData, "Lantern Engine");
             var old = Path.Combine(appData, "bbport-launcher");

@@ -1,0 +1,159 @@
+name: BloodborneX verified build
+on:
+  workflow_call:
+    inputs:
+      target:
+        type: string
+        default: windows
+      version:
+        type: string
+        default: ''
+    outputs:
+      tag:
+        value: ${{ jobs.prepare.outputs.tag }}
+      commit:
+        value: ${{ jobs.prepare.outputs.commit }}
+      tag_object:
+        value: ${{ jobs.prepare.outputs.tag_object }}
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      commit: ${{ steps.source.outputs.commit }}
+      tag_object: ${{ steps.source.outputs.tag_object }}
+      windows: ${{ steps.source.outputs.windows }}
+      linux: ${{ steps.source.outputs.linux }}
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate exact source, version and release ancestry
+        id: source
+        env:
+          TEST_TAG: ${{ inputs.version }}
+          TARGET: ${{ inputs.target }}
+        run: python3 tools/ci/release.py prepare --tag "$TEST_TAG" --target "$TARGET"
+      - name: Tracking policy, publisher regressions and locked inputs
+        run: |
+          python3 tools/ci/policy.py
+          python3 -m unittest discover -s tools/ci/tests -v
+
+  windows:
+    needs: prepare
+    if: needs.prepare.outputs.windows == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 150
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      COMMIT: ${{ needs.prepare.outputs.commit }}
+    steps:
+      - name: Keep scripts and checksum-locked inputs byte exact
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - name: Source identity and checksum-locked MSYS2 packages
+        run: |
+          python tools/ci/release.py stamp --tag "$TAG" --commit "$COMMIT"
+          python tools/ci/release.py download --group msys --folder _ci/msys
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.31.0
+        id: msys
+        with:
+          msystem: CLANG64
+          update: false
+          cache: false
+          install: git diffutils make unzip zip
+      - name: Install and verify the locked compiler dependency closure
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          pacman -U --noconfirm --needed _ci/msys/*.pkg.tar.zst
+          pacman -Q > build/ci/msys-packages.txt
+          python3 tools/ci/check-msys.py
+          rm -- _ci/msys/*.pkg.tar.zst
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.0.0
+        with:
+          dotnet-version: 8.0.426
+      - name: Reconstruct the pinned engine and ordered patches
+        run: python tools/ci/reconstruct.py --destination D:/bloodbornex-engine --report build/ci/engine-source.json
+      - name: Fresh compile, CPU regressions and portable release checks
+        shell: pwsh
+        env:
+          MSYS_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          ./tools/ci/finalize-windows.ps1 -Tag $env:TAG -EngineSource D:/bloodbornex-engine -MsysRoot $env:MSYS_ROOT 2>&1 | Tee-Object build/ci/windows-build.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v4.6.2
+        with:
+          name: release-windows
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Preserve failure diagnostics without shipping a failed package
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: diagnostics-windows
+          path: |
+            build/ci/*.log
+            build/ci/*.json
+            build/ci/*packages.txt
+            .release-work/*.log
+            releases/*/build.log
+            D:/bloodbornex-engine/out/gpu-build.log
+            D:/bloodbornex-engine/out/gpu/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
+          retention-days: 14
+
+  linux:
+    needs: prepare
+    if: needs.prepare.outputs.linux == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      COMMIT: ${{ needs.prepare.outputs.commit }}
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: 8.0.426
+      - name: Reconstruct the same native source
+        run: |
+          python3 tools/ci/release.py stamp --tag "$TAG" --commit "$COMMIT"
+          python3 tools/ci/reconstruct.py --destination _ci/native-engine --report build/ci/engine-source.json
+      - name: Build and independently test experimental Linux tarball
+        run: bash tools/ci/build-linux.sh 2>&1 | tee build/ci/linux-build.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: experimental-linux
+          path: dist-linux/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Preserve experimental Linux diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: diagnostics-linux
+          path: |
+            build/ci/*.log
+            build/ci/*.json
+            build/ci/*packages.txt
+            _ci/native-engine/out/gpu-build.log
+            _ci/native-engine/out/gpu/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore
+          retention-days: 14

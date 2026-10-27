@@ -38,3 +38,9 @@ Additional terms (GNU GPL version 3, section 7)
 
 You may not remove these additional terms from copies of Lantern Engine's own code. Nothing
 here restricts what the GPL allows for code that is not Lantern Engine's own.
+
+Release automation publication code is adapted from TheHiepDang/chiaki-ngx,
+scripts/ci/release.py at commit 53ea4b0e26855c66762abfbe683a4cfe02bb18a5.
+The original GNU Affero General Public License v3 with OpenSSL permission is
+retained in licenses/Chiaki-ngx-AGPL-3.0-OpenSSL.txt and applies to that build tool.
+https://github.com/TheHiepDang/chiaki-ngx

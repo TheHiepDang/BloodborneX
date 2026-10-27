@@ -1,0 +1,22 @@
+name: Validate BloodborneX
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional vMAJOR.MINOR.PATCH[-nr.rcN] validation label; no tag is created'
+        type: string
+        default: ''
+  schedule:
+    - cron: '17 3 * * 1'
+permissions:
+  contents: read
+concurrency:
+  group: bloodbornex-validate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    uses: ./.github/workflows/build-validation.yml
+    with:
+      target: windows
+      version: ${{ inputs.version || '' }}

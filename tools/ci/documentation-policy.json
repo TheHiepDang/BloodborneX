@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "root_readme": "README.md",
+  "inherited_markdown": {
+    "engine/README.md": {
+      "repository": "Awakenchan/LanternEngine",
+      "commit": "0c14d7340466c2ccfdcca237aa8104ecbf1eeadb",
+      "upstream_blob": "81e190c03e7343ef9cdc1f1143592f813c82cba5",
+      "sha256": "ae09b7833d0729aedcc916a7b68857f8427c52d9e3bf7d49cde4cccca28cfc03",
+      "fork_changes": "Build section points to the locked reconstruction recipe; inherited origin and credits retained."
+    },
+    "engine/online/SHADNET-PORT.md": {
+      "repository": "Awakenchan/LanternEngine",
+      "commit": "0c14d7340466c2ccfdcca237aa8104ecbf1eeadb",
+      "upstream_blob": "98f5ccaa66b772b3e9a0e594cefa738cdc668f0e",
+      "sha256": "8dc2c6ecf93f11cff7a473f8653de8235d4a6f8c5dc6bfd18930f6d5adb61c3d"
+    },
+    "launcher/windows/tests/LocalizationChecks/README.md": {
+      "repository": "Awakenchan/LanternEngine",
+      "commit": "0c14d7340466c2ccfdcca237aa8104ecbf1eeadb",
+      "upstream_blob": "8233ad3a68ecbad20b4f6472eb19336f390bd4d4",
+      "sha256": "f708c24c230fc4e5f2b93a2a814bbe104154bff61f5c018026d7bc51514a007c"
+    }
+  },
+  "canonicalization": "Inherited document digests normalize CRLF to LF for cross-platform checkouts"
+}

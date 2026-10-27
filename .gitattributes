@@ -1,1 +1,4 @@
 *.patch -text whitespace=-blank-at-eol
+*.sh text eol=lf
+engine/win_compat.h text eol=lf
+tools/ci/*.json text eol=lf

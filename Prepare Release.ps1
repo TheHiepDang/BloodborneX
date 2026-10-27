@@ -11,6 +11,7 @@ param(
     [ValidatePattern('^[D-Zd-z]$')][string]$BuildDrive = 'N',
     [ValidateRange(1,64)][int]$Jobs = 4,
     [switch]$NoPrompt,
+    [switch]$HostedCi,
     [switch]$CheckOnly
 )
 $ErrorActionPreference = 'Stop'
@@ -118,7 +119,7 @@ if ($CachedDownloads) { $arguments.CachedDownloads=$CachedDownloads }
 & (Join-Path $repo 'tools\build-nr-release.ps1') @arguments
 Write-Host '[3/4] Checking versions, archives, metadata and portable startup...' -ForegroundColor Cyan
 & (Join-Path $repo 'tools\verify-nr-release.ps1') -Release $release -Version $Version -ExpectedEngineHash $builtHash -ArtifactPrefix $ArtifactPrefix
-& (Join-Path $repo 'tools\test-nr-release.ps1') -Release $release | Out-Host
+& (Join-Path $repo 'tools\test-nr-release.ps1') -Release $release -HostedCi:$HostedCi | Out-Host
 Write-Host '[4/4] Preparing the upload folder...' -ForegroundColor Cyan
 $upload = Join-Path $release 'Upload'
 New-Item -ItemType Directory -Path $upload | Out-Null

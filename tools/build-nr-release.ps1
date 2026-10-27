@@ -4,7 +4,7 @@
 param(
     [Parameter(Mandatory)][string]$EngineSource,
     [string]$Version = '1.0.1',
-    [string]$ReleaseNotesFile = 'NR-1.0.1.md',
+    [string]$ReleaseNotesFile = '',
     [string]$ReleaseNotesPath = '',
     [string]$MsysRoot = 'C:\msys64',
     [string]$CachedDownloads = '',
@@ -17,8 +17,10 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $engine = (Resolve-Path $EngineSource).Path
 $release = Join-Path ([IO.Path]::GetFullPath($ReleaseRoot)) $Version
 if ($Version -notmatch '^\d+\.\d+\.\d+(-nr\.rc\d+)?$') { throw 'Expected a stable version such as 1.0.1 or an NR candidate such as 0.9.9-nr.rc2' }
-$notes = if ($ReleaseNotesPath) { [IO.Path]::GetFullPath($ReleaseNotesPath) } else { Join-Path $repo ("docs\$ReleaseNotesFile") }
-if (!(Test-Path -LiteralPath $notes -PathType Leaf)) { throw "Missing release notes: $notes" }
+if ($ReleaseNotesFile) { throw 'Internal docs are not release inputs. Supply a public -ReleaseNotesPath instead.' }
+$notes = if ($ReleaseNotesPath) { [IO.Path]::GetFullPath($ReleaseNotesPath) } else { '' }
+if ($notes -and !(Test-Path -LiteralPath $notes -PathType Leaf)) { throw "Missing public release notes: $notes" }
+$inputLock = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ci/inputs.json') -Raw | ConvertFrom-Json
 if (Test-Path -LiteralPath $release) { throw "Refusing to overwrite existing release: $release" }
 $bin = Join-Path $MsysRoot 'clang64\bin'
 $out = Join-Path $engine 'out'
@@ -30,6 +32,10 @@ $package = Join-Path $release 'LanternEngine'
 $build = Join-Path $release 'build'
 $cache = Join-Path $release 'downloads'
 foreach ($dir in @($package,$build,$cache)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+if (!$notes) {
+    $notes = Join-Path $build 'public-notes.txt'
+    [IO.File]::WriteAllText($notes, "BloodborneX v$Version`n`nA changed, unofficial fork of Lantern Engine by Awaken (https://github.com/Awakenchan/LanternEngine).`nSupply your own NR model at dlss/nvngx_dlssnr.dll. See START-HERE.md.`n")
+}
 Start-Transcript -Path (Join-Path $release 'build.log') | Out-Null
 try {
     function Copy-One([string]$From, [string]$To) {
@@ -96,10 +102,10 @@ try {
     # Ship the signed production runtime with the package so an updater install is
     # ready for DLSS-G without a separate user setup step. The installer extracts
     # only the pinned files and writes their verified manifest.
-    $streamline = Download 'https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.14.16/streamline-sdk-v2.14.16.zip' `
-        'streamline-sdk-v2.14.16.zip' '32041E51DB0CAB709A271B72A352281B690C2ABBD669A827809401A5DD23956B'
+    $streamline = Download $inputLock.downloads.streamline.url 'streamline-sdk-v2.14.16.zip' $inputLock.downloads.streamline.sha256
     & (Join-Path $PSScriptRoot 'install-streamline.ps1') -PackageRoot $package -SdkArchivePath $streamline
     if (!$?) { throw 'Could not install the verified Streamline runtime into the package' }
+    & (Join-Path $PSScriptRoot 'ci/stage-msvc-runtime.ps1') -Package $package
     # Resolve the native dependency closure rather than assuming MSYS2 is installed on the player PC.
     $queue = [Collections.Generic.Queue[string]]::new()
     Get-ChildItem $package -Recurse -File | Where-Object Extension -In '.exe','.dll' | ForEach-Object { $queue.Enqueue($_.FullName) }
@@ -122,31 +128,27 @@ try {
             $queue.Enqueue($dest)
         }
     }
-    $python = Download 'https://www.python.org/ftp/python/3.13.17/python-3.13.17-embeddable-amd64.zip' 'python-3.13.17-embeddable-amd64.zip' '0BA1EE4BFCBDC3A559D27E2E9CE76D04A7839947A23F46375872C755C0D463B8'
+    $python = Download $inputLock.downloads.python.url 'python-3.13.17-embeddable-amd64.zip' $inputLock.downloads.python.sha256
     $pythonDir = Join-Path $package 'engine\tools\python'
     Expand-Archive -LiteralPath $python -DestinationPath $pythonDir
     # Generated embedded-runtime search configuration: no dependence on a machine Python install.
     [IO.File]::WriteAllText((Join-Path $pythonDir 'python313._pth'), "python313.zip`n.`n..\..\scripts`n", [Text.UTF8Encoding]::new($false))
-    $sr = Download 'https://raw.githubusercontent.com/NVIDIA/DLSS/v310.9.1/lib/Windows_x86_64/rel/nvngx_dlss.dll' 'nvngx_dlss.dll' '3975567B8943C53ACCE397F2B72380092F84F162D00B0D2C7D08A1025C563983'
+    $sr = Download $inputLock.downloads.'dlss-sr'.url 'nvngx_dlss.dll' $inputLock.downloads.'dlss-sr'.sha256
     Copy-One $sr (Join-Path $targetOut 'nvngx_dlss.dll')
-    $srLicense = Download 'https://raw.githubusercontent.com/NVIDIA/DLSS/v310.9.1/LICENSE.txt' 'NVIDIA-DLSS-LICENSE.txt'
+    $srLicense = Download $inputLock.downloads.'dlss-sr-license'.url 'NVIDIA-DLSS-LICENSE.txt' $inputLock.downloads.'dlss-sr-license'.sha256
     Copy-One $srLicense (Join-Path $package 'licenses\NVIDIA-DLSS-LICENSE.txt')
     Copy-One (Join-Path $pythonDir 'LICENSE.txt') (Join-Path $package 'licenses\Python-LICENSE.txt')
     Copy-One (Join-Path $repo 'LICENSE') (Join-Path $package 'licenses\GPL-2.0-legacy.txt')
     Copy-One (Join-Path $repo 'licenses\GPL-3.0.txt') (Join-Path $package 'licenses\GPL-3.0.txt')
     Copy-One (Join-Path $repo 'NOTICE') (Join-Path $package 'NOTICE')
+    Copy-One (Join-Path $repo 'licenses/Chiaki-ngx-AGPL-3.0-OpenSSL.txt') (Join-Path $package 'licenses/Chiaki-ngx-AGPL-3.0-OpenSSL.txt')
     Copy-Item -LiteralPath (Join-Path $engine 'licenses') -Destination (Join-Path $package 'licenses\engine') -Recurse
     Copy-Item -LiteralPath (Join-Path $MsysRoot 'clang64\share\licenses') -Destination (Join-Path $package 'licenses\msys2-clang64') -Recurse
     & (Join-Path $PSScriptRoot 'copy-nr-notices.ps1') -EngineSource $engine -Package $package
-    foreach ($name in @('DLSSNR-HANDOFF.md','NR-RC1.md','NR-RC2.md','RELEASING.md')) {
-        Copy-One (Join-Path $repo "docs\$name") (Join-Path $package "docs\$name")
-    }
-    $startText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'nr-start-here.template.md')).Replace('{{VERSION}}',$Version).Replace('{{BUILD_DATE}}',[DateTimeOffset]::UtcNow.ToString('yyyy-MM-dd')+' UTC')
+    $startText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'nr-start-here.template.txt')).Replace('{{VERSION}}',$Version).Replace('{{BUILD_DATE}}',[DateTimeOffset]::UtcNow.ToString('yyyy-MM-dd')+' UTC')
     $releaseKind = if ($Version.Contains('-nr.rc')) { 'prerelease' } else { 'stable release' }
     $startText = $startText.Replace('{{RELEASE_KIND}}',$releaseKind)
     [IO.File]::WriteAllText((Join-Path $package 'START-HERE.md'),$startText,[Text.UTF8Encoding]::new($false))
-    [IO.File]::WriteAllText((Join-Path $package 'docs\NR-RELEASE.md'),$startText,[Text.UTF8Encoding]::new($false))
-    Copy-One $notes (Join-Path $package "docs\NR-$Version.md")
     [IO.File]::WriteAllText((Join-Path $package 'LOCAL-NR-RELEASE'), "$Version`nUpdates require compatible full packages from TheHiepDang/BloodborneX.`n")
     @{version=$Version;engine="lantern-native-nr-$Version";update_family='bloodbornex-native-nr-v1';repository='TheHiepDang/BloodborneX'} |
         ConvertTo-Json | Set-Content (Join-Path $package 'package.json') -Encoding utf8
@@ -160,11 +162,14 @@ try {
 
     $provenance = [ordered]@{
         version=$Version; artifact_prefix=$ArtifactPrefix; created_utc=[DateTime]::UtcNow.ToString('o');
-        repository_head=(& git -C $repo rev-parse HEAD); dirty_source=$true;
+        repository_head=(& git -C $repo rev-parse HEAD); dirty_source=([bool](& git -C $repo status --porcelain --untracked-files=no));
         engine_upstream='https://github.com/DarkIzuku/bloodborne_pc'; engine_base='8ecba9a4abdd54747e31d7fee54982e422b5f8e2';
         engine_patch_sha256=(Get-FileHash (Join-Path $repo 'engine\bbhost-changes.patch')).Hash;
         supplemental_engine_patches=@($supplemental); applied_engine_snapshot='LanternEngine-source/engine-source';
         fixes=@('FSR FG transient allocation retirement','RTX 50 original NR runtime selection','NR Performance model scaling','DLSS-G HDR presenter input','Complete Streamline runtime packaged','Discord features removed');
+        native_reconstruction=$(if (Test-Path -LiteralPath (Join-Path $engine 'CI-SOURCE.json')) { Get-Content -LiteralPath (Join-Path $engine 'CI-SOURCE.json') -Raw | ConvertFrom-Json } else { @{ mode='local-applied-snapshot'; reproducible_source_verified=$false; approved_markdown=@($inputLock.inherited_engine_markdown) } });
+        dependency_lock_sha256=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'ci/inputs.json')).Hash;
+        app_local_crt=(Get-Content -LiteralPath (Join-Path $targetOut 'msvc-runtime.json') -Raw | ConvertFrom-Json);
         tested_engine_outputs=$engineHashes; downloads=$script:downloads;
         nr_runtime_included=$false; streamline_runtime_included=$true; startup='bundled Python; native bb-start intentionally omitted';
         optional_assets_omitted=@('FSR4/FSR4.1.1','bbbridge online helper');
@@ -174,46 +179,17 @@ try {
     # Source snapshot includes uncommitted final sources, but excludes ignored binaries/runtime/user data.
     $source = Join-Path $release 'LanternEngine-source'
     function Copy-GitSource([string]$From,[string]$To) {
-        if (Test-Path -LiteralPath (Join-Path $From '.git')) {
-            $files = & git -C $From -c core.quotepath=false ls-files --cached --others --exclude-standard
-            if ($LASTEXITCODE) { throw "Cannot enumerate source $From" }
-        } else {
-            # Applied source snapshots are supported without creating a repository.
-            # Filter again below, independently of ignore files or rg glob ordering.
-            $pending = [Collections.Generic.Stack[string]]::new()
-            $pending.Push($From)
-            $files = [Collections.Generic.List[string]]::new()
-            $excludedFolders = '(^|/)(\.git|\.vs|\.idea|\.agents|\.codex|\.release-work|releases|out|bin|obj|build|pgo|user|logs|dist|test-temp|__pycache__|\.pytest_cache|fsr4_shaders|fsr4_411)(/|$)'
-            while ($pending.Count) {
-                $current = $pending.Pop()
-                foreach ($directory in [IO.Directory]::EnumerateDirectories($current)) {
-                    $relative = [IO.Path]::GetRelativePath($From,$directory).Replace('\','/')
-                    if ($relative -match $excludedFolders -or $relative -match '^(1060|docs/savedata_route|launcher-windows)(/|$)' -or
-                        $directory -eq $release -or $directory.StartsWith($release+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -or
-                        ([IO.File]::GetAttributes($directory) -band [IO.FileAttributes]::ReparsePoint)) { continue }
-                    $pending.Push($directory)
-                }
-                foreach ($absolute in [IO.Directory]::EnumerateFiles($current)) {
-                    $relative = [IO.Path]::GetRelativePath($From,$absolute).Replace('\','/')
-                    if ($relative -match '(^|/)(\.release-settings\.json|bbport\.ini|lantern\.ini|mods\.json|patches\.json|game_dir\.txt|prepared\.json|message[^/]*\.txt|perf\.data|vkd3d-proton\.cache)$' -or
-                        $relative -match '\.(dll|exe|pdb|dmp|log|orig|bak|old|obj|o|a|lib|zip|7z|mp4|cache|pyc)$') { continue }
-                    $files.Add($relative)
-                }
-            }
-        }
-        foreach ($relative in $files | Select-Object -Unique) {
-            $file = Join-Path $From $relative
-            if ((Test-Path -LiteralPath $file -PathType Leaf) -and !$file.StartsWith($release+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -and $relative -notmatch '(^|/)(nvngx_dlssnr\.dll|releases)(/|$)') {
-                Copy-One $file (Join-Path $To $relative)
-            }
-        }
+        $kind = if ($From -eq $repo) { 'repo' } else { 'engine' }
+        Run 'python' @((Join-Path $PSScriptRoot 'ci/policy.py'), '--stage-from', $From, '--stage-to', $To,
+                       '--source-kind', $kind, '--engine-root', $engine)
     }
     Copy-GitSource $repo (Join-Path $source 'BloodborneX')
     Copy-GitSource $engine (Join-Path $source 'engine-source')
+    $provenance.native_reconstruction | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $source 'engine-source/CI-SOURCE.json') -Encoding utf8
     foreach ($submodule in @('gpu/third_party/fsr-vulkan','gpu/third_party/imgui','third_party/LibAtrac9')) {
         Copy-GitSource (Join-Path $engine $submodule) (Join-Path $source "engine-source/$submodule")
     }
-    foreach ($helper in @('build-nr-release.ps1','nr-release-default.ini','copy-nr-notices.ps1','build-release-engine.sh','start-release.ps1','verify-nr-release.ps1','test-nr-release.ps1','nr-start-here.template.md','install-streamline.ps1','Install Streamline.cmd')) {
+    foreach ($helper in @('build-nr-release.ps1','nr-release-default.ini','copy-nr-notices.ps1','build-release-engine.sh','start-release.ps1','verify-nr-release.ps1','test-nr-release.ps1','nr-start-here.template.txt','install-streamline.ps1','Install Streamline.cmd')) {
         Copy-One (Join-Path $PSScriptRoot $helper) (Join-Path $source "BloodborneX/tools/$helper")
     }
     @'

@@ -86,18 +86,17 @@ credited in the code.
 
 ## Build
 
-In the MSYS2 **CLANG64** shell (packages as in the engine's README):
+The fork's exact native revision, recursive submodules, ordered patches and dependency hashes
+are recorded in `tools/ci/inputs.json`. From the BloodborneX repository root:
 
-```bash
-git clone --branch v0.4.0-darkizuku-preview.1 --recurse-submodules https://github.com/DarkIzuku/bloodborne_pc
-cd bloodborne_pc
-git apply /path/to/engine/bbhost-changes.patch
-cp /path/to/engine/win_compat.h gpu/
-CFLAGS="-Wno-error=unused-but-set-global" CXXFLAGS="-include $PWD/gpu/win_compat.h" bash build.sh
+```powershell
+python tools/ci/reconstruct.py --destination _ci/native-engine --report _ci/engine-source.json
+./Prepare Release.ps1 -Version 1.0.2-nr.rc8 -EngineSource _ci/native-engine -NoPrompt
 ```
 
-`win_compat.h` supplies headers the bundled FSR 3 SDK expects transitively, which newer libc++
-no longer includes. The result is `out/bb-probe.exe`; the package's `out/` holds it with the
-CLANG64 DLLs it loads.
+The reconstruction helper canonicalizes documented CRLF text, verifies patch hashes and applies
+every patch with an exact preflight check. It stages `win_compat.h` and locks CMake Git inputs.
+The existing MSYS2 CLANG64 build compiles the engine; no previously released executable is used.
+The user supplies game data and the NR model separately. See the root README for CI/release use.
 
 GPL-3.0-or-later, like the engine.

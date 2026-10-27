@@ -1,6 +1,6 @@
 # Non-game portable-package smoke tests. Extracts to a fresh temporary path with spaces.
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Release)
+param([Parameter(Mandatory)][string]$Release, [switch]$HostedCi)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $releaseDir = (Resolve-Path $Release).Path
@@ -45,19 +45,51 @@ try {
     $probe = & (Join-Path $package 'engine\out\bb-probe.exe') 2>&1
     if ($LASTEXITCODE -ne 1 -or ($probe -join "`n") -notmatch 'Usage:') { throw "Engine loader smoke failed: $probe" }
     $checks.Add('Packaged bb-probe reaches its expected usage exit with PATH restricted to Windows folders.')
-    & (Join-Path $package 'engine\out\bb-gpu-capabilities.exe') --live-resolution
-    if ($LASTEXITCODE) { throw 'Packaged Vulkan capability probe failed' }
-    $checks.Add('Packaged Vulkan capability probe succeeds with PATH restricted to Windows folders.')
+    # This process belongs to this fresh extraction, never to an installed user game.
+    $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $package 'Lantern Engine.exe'))
+    $start.WorkingDirectory = $package
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $config = Join-Path $testDir 'isolated-launcher-config'
+    New-Item -ItemType Directory -Path $config -Force | Out-Null
+    @{check_updates=$false;setup_shown=$true;ui_language='en';port_dir=$package} |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $config 'settings.json') -Encoding utf8
+    $start.Environment['BLOODBORNEX_CONFIG_DIR'] = $config
+    $gui = [Diagnostics.Process]::Start($start)
+    try {
+        if (!$gui.WaitForInputIdle(30000)) { throw 'Packaged launcher did not reach a ready window.' }
+        $gui.Refresh()
+        if ($gui.HasExited -or $gui.MainWindowTitle -ne 'Lantern Engine' -or
+            @(Get-ChildItem -LiteralPath $package -Recurse -File -Filter '*crash*.log').Count) {
+            throw 'Packaged launcher startup failed or wrote a crash report.'
+        }
+        $checks.Add('Packaged self-contained WPF launcher reaches its ready window with development PATH removed.')
+    } finally {
+        if (!$gui.HasExited) {
+            $gui.CloseMainWindow() | Out-Null
+            if (!$gui.WaitForExit(10000)) { $gui.Kill(); throw 'Owned smoke-test launcher did not close cleanly.' }
+        }
+    }
+
+    $capability = & (Join-Path $package 'engine\out\bb-gpu-capabilities.exe') --live-resolution 2>&1
+    $capabilityExit = $LASTEXITCODE
+    $capabilityText = $capability -join "`n"
+    if ($capabilityExit -eq 0) {
+        $checks.Add('Packaged Vulkan capability enumeration succeeds; this is not NR/gameplay validation.')
+    } elseif ($HostedCi -and $capabilityExit -eq 1 -and $capabilityText.Trim() -match '^GPU scene scaling: (cannot create Vulkan instance|no Vulkan device)$') {
+        $checks.Add('HARDWARE UNAVAILABLE: packaged probe ran, but this hosted runner provides no Vulkan ICD/device. GPU/NR/FG gameplay is not certified.')
+        Write-Host '[Validation][Hardware] No Vulkan ICD/device on hosted runner; strict native loader, package and non-GPU checks remain required.'
+    } else { throw "Packaged Vulkan capability probe failed unexpectedly: $capabilityText (exit $capabilityExit)" }
 } finally {
     Set-Location -LiteralPath $oldLocation.Path
     $env:PATH = $oldPath
     $env:PYTHONDONTWRITEBYTECODE = $oldBytecode
 }
 $report = @("# BloodborneX $($metadata.version) portable validation",'',"Completed $([DateTimeOffset]::UtcNow.ToString('o')).",'')
-$report += $checks | ForEach-Object { "- PASS: $_" }
+$report += $checks | ForEach-Object { if ($_ -like "HARDWARE UNAVAILABLE:*") { "- $_" } else { "- PASS: $_" } }
 $report += @('', 'A fresh temporary extraction with spaces was used. Startup ran without system Python/MSYS2 PATH.',
     'These checks do not launch gameplay or certify rendering/NR visual quality. Vulkan validation-layer coverage is not claimed.',
     'No game, saves or proprietary NR model is included. No GitHub publication or push was performed.', '',
-    "Temporary smoke extraction retained at: $testDir")
+    'Temporary extraction was isolated from installed games and user data.')
 $report | Set-Content (Join-Path $releaseDir 'VALIDATION.md') -Encoding utf8
 $report

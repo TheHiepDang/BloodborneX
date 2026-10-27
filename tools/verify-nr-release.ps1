@@ -35,6 +35,12 @@ foreach ($name in $streamlineFiles) {
 }
 Check (@(Get-ChildItem -LiteralPath $streamlineOut -File -Filter 'sl.*.dll' |
          Where-Object { $_.Name -notin $streamlineFiles }).Count -eq 0) 'No extra Streamline plugin is packaged'
+$crtRecord = Get-Content -LiteralPath (Join-Path $package 'engine/out/msvc-runtime.json') -Raw | ConvertFrom-Json -AsHashtable
+Check ($crtRecord.files.Count -eq 3) 'Three matched app-local Visual C++ runtime files are recorded'
+foreach ($name in @('msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll')) {
+    $file = Join-Path $package "engine/out/$name"
+    Check ((Test-Path -LiteralPath $file) -and (Get-FileHash -LiteralPath $file).Hash -eq $crtRecord.files[$name].sha256) "App-local CRT identity: $name"
+}
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $expectedArchives=@("$ArtifactPrefix-$Version-win64.zip","$ArtifactPrefix-$Version-source.zip")
 $checksumLines=@(Get-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt'))

@@ -1,0 +1,46 @@
+name: Release BloodborneX
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional version label; manual runs validate Windows only and NEVER publish'
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: bloodbornex-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    uses: ./.github/workflows/build-validation.yml
+    with:
+      target: windows
+      version: ${{ inputs.version || '' }}
+  publish:
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.repository == 'TheHiepDang/BloodborneX'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          ref: ${{ needs.build.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-windows
+          path: dist
+      - name: Create draft, verify assets by ID and publish last
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+          COMMIT: ${{ needs.build.outputs.commit }}
+          TAG_OBJECT: ${{ needs.build.outputs.tag_object }}
+        run: |
+          python3 tools/ci/release.py publish --folder dist --tag "$TAG" \
+            --commit "$COMMIT" --tag-object "$TAG_OBJECT"

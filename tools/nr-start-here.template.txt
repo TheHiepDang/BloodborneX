@@ -75,7 +75,7 @@ the local packaging operation. Until compatible releases exist, there is no upda
 
 For publishing later, attach the `*-win64.zip`, `package.json` and `SHA256SUMS.txt`
 to a GitHub release tagged `v{{VERSION}}` ({{RELEASE_KIND}}). Attach the source
-ZIP as a separate source asset. Increment the embedded version for each future release. See `RELEASING.md` for the publication checklist.
+ZIP as a separate source asset. Increment the embedded version for each future release. Automated releases use the tag and verified workflow described in the repository README.
 The release must attach its matching `package.json` separately; metadata inside the ZIP alone is insufficient for the updater.
 
 ## Scope and limitations
@@ -98,7 +98,6 @@ The release must attach its matching `package.json` separately; metadata inside 
   descriptor and constant-buffer retention is fixed. A roughly five-minute NR+FG
   gameplay retest showed bounded memory; this is not all-scene/long-session coverage.
   No unofficial RTX 20/30 DLSS FG proxy is integrated.
-- Current validation is a local RC, not broad GPU/HDR/ultrawide certification.
+- CI validation covers compilation, dependencies and portable startup, not broad GPU/HDR/ultrawide certification.
 
-See `NR-{{VERSION}}.md` for current release notes, `NR-RC2.md` for the preceding candidate, and `NR-RC1.md` for earlier observations and `DLSSNR-HANDOFF.md` for development
-context. `BUILD-PROVENANCE.json` and `FILES-SHA256.txt` identify package inputs.
+See `RELEASE-NOTES.md` for this release. `BUILD-PROVENANCE.json` and `FILES-SHA256.txt` identify the package inputs.
