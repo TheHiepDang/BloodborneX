@@ -157,6 +157,35 @@
             new(L.T("The DLL's default"), "default", L.T("Whatever the included DLSS version picks for each quality mode")),
         };
 
+        public static readonly Choice[] DlssNrPresets =
+        {
+            new(L.T("Default (recommended)"), "0"),
+            new("Preset 1", "1"), new("Preset 2", "2"), new("Preset 3", "3"),
+        };
+
+        public static readonly Choice[] DlssNrStyles =
+        {
+            new(L.T("Standard"), "0"), new(L.T("Natural"), "1"), new(L.T("Cinematic"), "2"),
+        };
+
+        public static readonly Choice[] DlssNrPasses =
+        {
+            new(L.T("1 pass (default)"), "1"), new(L.T("2 passes"), "2"), new(L.T("3 passes"), "3"),
+        };
+
+        public static readonly Choice[] DlssNrHeights =
+        {
+            new(L.T("Native"), "0"),
+            new("480p", "480"), new("540p", "540"), new("720p", "720"),
+            new("900p", "900"), new("1080p", "1080"), new("1200p", "1200"),
+            new("1440p", "1440"), new("1600p", "1600"), new("1800p", "1800"),
+            new("2160p", "2160"),
+        };
+
+        public static Choice[] DlssNrInputs(int outputHeight) => DlssNrHeights
+            .Where(c => c.Value == "0" || int.Parse(c.Value) <= outputHeight)
+            .ToArray();
+
         /// <summary>What opens the port's in-game settings menu (BB_OVERLAY_KEYS).</summary>
         public static readonly Choice[] OverlayKeys =
         {

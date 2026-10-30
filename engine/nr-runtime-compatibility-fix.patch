@@ -1,0 +1,187 @@
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp
+@@ -1,4 +1,5 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ #include "video_core/renderer_vulkan/vk_dlss.h"
++#include "video_core/renderer_vulkan/nr_runtime_identity.h"
+ 
+ #include <array>
+@@ -50,8 +51,5 @@
+ std::mutex nr_mutex;
+ #ifdef _WIN32
+-bool KnownRuntime(const std::filesystem::path& path) {
+-    static constexpr std::array<unsigned char, 32> expected{
+-        0xCD,0xFA,0x6C,0x1E,0xC7,0x84,0x86,0x71,0x82,0x16,0x4C,0x78,0x36,0xF3,0x24,0xF0,
+-        0x87,0xB5,0xC9,0xF3,0x74,0xD0,0xC9,0xFE,0x46,0xF5,0x49,0x99,0xFE,0xAB,0xF3,0xED};
++bool RuntimeSha256(const std::filesystem::path& path, std::string& hex) {
+     BCRYPT_ALG_HANDLE algorithm{}; BCRYPT_HASH_HANDLE handle{};
+     DWORD object_size = 0, hash_size = 0, got = 0;
+@@ -60,5 +58,5 @@
+                                 sizeof(object_size), &got, 0) >= 0 &&
+               BCryptGetProperty(algorithm, BCRYPT_HASH_LENGTH, reinterpret_cast<PUCHAR>(&hash_size),
+-                                sizeof(hash_size), &got, 0) >= 0 && hash_size == expected.size();
++                                sizeof(hash_size), &got, 0) >= 0 && hash_size == 32;
+     std::vector<unsigned char> object(object_size), digest(hash_size), buffer(1 << 20);
+     ok = ok && BCryptCreateHash(algorithm, &handle, object.data(), DWORD(object.size()),
+@@ -70,6 +68,13 @@
+         if (bytes > 0) ok = BCryptHashData(handle, buffer.data(), ULONG(bytes), 0) >= 0;
+     }
+-    ok = ok && file.eof() && BCryptFinishHash(handle, digest.data(), DWORD(digest.size()), 0) >= 0 &&
+-         std::equal(digest.begin(), digest.end(), expected.begin());
++    ok = ok && file.eof() && BCryptFinishHash(handle, digest.data(), DWORD(digest.size()), 0) >= 0;
++    if (ok) {
++        constexpr char digits[] = "0123456789ABCDEF";
++        hex.clear();
++        for (const auto byte : digest) {
++            hex += digits[byte >> 4];
++            hex += digits[byte & 15];
++        }
++    }
+     if (handle) BCryptDestroyHash(handle);
+     if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+@@ -191,5 +196,9 @@
+             if (GetModuleFileNameW(nullptr, exe, MAX_PATH)) root = std::filesystem::path(exe).parent_path() / L"dlss";
+         }
++        const bool prefer_original = NrRuntime::PrefersOriginal(instance.GetVendorID(), instance.GetModelName());
+         const auto runtime = root / L"nvngx_dlssnr.dll";
++        std::printf("DLSS NR: GPU route %s for %s\n",
++                    prefer_original ? "original runtime support (RTX 50-series)" : "FP16 compatibility support",
++                    std::string(instance.GetModelName()).c_str());
+         auto gate = root / L"nvngx.dll_dlssnr.dll";
+         if (!std::filesystem::exists(gate, ec)) {
+@@ -199,9 +208,25 @@
+         }
+         if (!std::filesystem::exists(runtime, ec)) { Fail("nvngx_dlssnr.dll is missing"); return; }
+-        // The known DVS production runtime. Unknown binaries are rejected unless explicitly opted in.
+-        constexpr uintmax_t known_size = 276162560;
+-        if ((std::filesystem::file_size(runtime, ec) != known_size || !KnownRuntime(runtime)) &&
+-            !std::getenv("BB_DLSS_NR_ALLOW_UNKNOWN")) {
+-            Fail("nvngx_dlssnr.dll does not match the validated runtime"); return;
++        const auto runtime_size = std::filesystem::file_size(runtime, ec);
++        std::string runtime_hash;
++        if (ec || !RuntimeSha256(runtime, runtime_hash)) {
++            Fail("cannot read/hash nvngx_dlssnr.dll: " + runtime.string()); return;
++        }
++        const auto* identity = NrRuntime::Identify(runtime_size, runtime_hash);
++        std::printf("DLSS NR runtime: path=%s; bytes=%llu; SHA256=%s; identity=%s\n",
++                    runtime.string().c_str(), static_cast<unsigned long long>(runtime_size),
++                    runtime_hash.c_str(), identity ? identity->name : "unrecognized");
++        if (!identity && !std::getenv("BB_DLSS_NR_ALLOW_UNKNOWN")) {
++            Fail("unrecognized nvngx_dlssnr.dll (see runtime path/size/SHA256 above; "
++                 "use a documented runtime build)"); return;
++        }
++        if (identity && identity->build == NrRuntime::Build::Original && !prefer_original) {
++            Fail("the unmodified NR runtime is enabled only for GeForce RTX 50-series; "
++                 "install the FP16 compatibility runtime as dlss/nvngx_dlssnr.dll");
++            return;
++        }
++        if (identity && !identity->gameplay_validated) {
++            std::printf("DLSS NR: recognized original runtime; Vulkan compatibility is unvalidated "
++                        "in this build; startup and feature checks still apply\n");
+         }
+         forwarder = LoadLibraryExW(gate.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+@@ -213,8 +238,12 @@
+         const auto data = std::filesystem::temp_directory_path(ec) / "lantern-ngx-nr";
+         std::filesystem::create_directories(data, ec);
+-        if (init(runtime.c_str(), data.c_str(), (void*)VkInstance(instance.GetInstance()),
+-                 (void*)VkPhysicalDevice(instance.GetPhysicalDevice()),
+-                 (void*)VkDevice(instance.GetDevice()), 0x15) != 1) {
+-            Fail("feature 18 runtime initialization failed"); return;
++        const int init_result = init(runtime.c_str(), data.c_str(), (void*)VkInstance(instance.GetInstance()),
++                                     (void*)VkPhysicalDevice(instance.GetPhysicalDevice()),
++                                     (void*)VkDevice(instance.GetDevice()), 0x15);
++        if (init_result != 1) {
++            char message[128];
++            std::snprintf(message, sizeof(message), "feature 18 runtime initialization failed (0x%08x)",
++                          unsigned(init_result));
++            Fail(message); return;
+         }
+         params = static_cast<NgxParameter*>(dlss.AllocateExtensionParameters());
+--- a/gpu/CMakeLists.txt
++++ b/gpu/CMakeLists.txt
+@@ -332,4 +332,7 @@
+     target_link_libraries(motion-shader-test PRIVATE winmm ws2_32 psapi onecore)
+ endif()
++add_executable(nr-runtime-identity-test EXCLUDE_FROM_ALL ../tests/test_nr_runtime_identity.cpp)
++target_compile_options(nr-runtime-identity-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
++target_include_directories(nr-runtime-identity-test PRIVATE shadps4)
+ add_executable(ui-composition-test EXCLUDE_FROM_ALL ../tests/test_ui_composition.cpp)
+ target_compile_options(ui-composition-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/nr_runtime_identity.h b/gpu/shadps4/video_core/renderer_vulkan/nr_runtime_identity.h
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/renderer_vulkan/nr_runtime_identity.h
+@@ -0,0 +1,45 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++#pragma once
++#include <array>
++#include <cstdint>
++#include <string_view>
++
++namespace Vulkan::NrRuntime {
++enum class Build { OpenNrFp16, Original };
++struct Identity {
++    std::uint64_t size;
++    std::string_view sha256;
++    const char* name;
++    bool gameplay_validated;
++    Build build;
++};
++// Identity is not runtime validation. Keep the Vulkan export/init/evaluate checks.
++inline constexpr std::array Identities{
++    Identity{276162560,
++        "CDFA6C1EC784867182164C7836F324F087B5C9F374D0C9FE46F54999FEABF3ED",
++        "openNR FP16 compatibility 310.9.16.0", true, Build::OpenNrFp16},
++    Identity{266424944,
++        "2BC19BC09A7B89DD44F73E2AC0108FCC586E2154BDD0830F242F4F040E28789F",
++        "original RenoDX-distributed 310.9.16.0 (2026-10-16)", false, Build::Original},
++};
++constexpr bool ContainsIgnoreCase(std::string_view text, std::string_view part) {
++    const auto upper = [](char c) { return c >= 'a' && c <= 'z' ? char(c-'a'+'A') : c; };
++    for (std::size_t i = 0; i + part.size() <= text.size(); ++i) {
++        bool match = true;
++        for (std::size_t j = 0; j < part.size(); ++j)
++            if (upper(text[i+j]) != upper(part[j])) { match = false; break; }
++        if (match) return true;
++    }
++    return false;
++}
++constexpr bool PrefersOriginal(std::uint32_t vendor, std::string_view gpu) {
++    // Requiring GeForce avoids confusing the Turing workstation RTX 5000 with RTX 50-series.
++    return vendor == 0x10de && ContainsIgnoreCase(gpu, "GeForce RTX 50");
++}
++constexpr const Identity* Identify(std::uint64_t size, std::string_view sha256) {
++    for (const auto& identity : Identities) {
++        if (identity.size == size && identity.sha256 == sha256) return &identity;
++    }
++    return nullptr;
++}
++} // namespace Vulkan::NrRuntime
+diff --git a/tests/test_nr_runtime_identity.cpp b/tests/test_nr_runtime_identity.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/test_nr_runtime_identity.cpp
+@@ -0,0 +1,23 @@
++#include "video_core/renderer_vulkan/nr_runtime_identity.h"
++#include <cassert>
++#include <string>
++#include <cstdio>
++int main() {
++    using namespace Vulkan::NrRuntime;
++    for(const auto& i:Identities) {
++        assert(Identify(i.size,i.sha256)==&i);
++        assert(!Identify(i.size+1,i.sha256));
++        auto corrupt=std::string(i.sha256);corrupt[0]=corrupt[0]=='0'?'1':'0';
++        assert(!Identify(i.size,corrupt));
++    }
++    assert(!Identify(Identities[0].size,Identities[1].sha256));
++    assert(!Identify(Identities[1].size,Identities[0].sha256));
++    assert(!Identify(0,""));
++    assert(PrefersOriginal(0x10de,"NVIDIA GeForce RTX 5080"));
++    assert(PrefersOriginal(0x10de,"nvidia geforce rtx 5090 laptop GPU"));
++    assert(!PrefersOriginal(0x10de,"NVIDIA GeForce RTX 3070"));
++    assert(!PrefersOriginal(0x10de,"NVIDIA GeForce RTX 4090"));
++    assert(!PrefersOriginal(0x10de,"NVIDIA Quadro RTX 5000"));
++    assert(!PrefersOriginal(0x1002,"GeForce RTX 5080"));
++    std::puts("NR runtime identity: both exact builds accepted; mixed size/hash and mutations rejected.");
++}

@@ -4,6 +4,7 @@
        is the WPF launcher's own files, compiled here too; AVALONIA marks what differs. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+    <Version>1.0.1</Version>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

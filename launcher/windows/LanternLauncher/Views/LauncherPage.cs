@@ -565,7 +565,7 @@ namespace BloodborneLauncher.Views
         /// The chosen option's note shows under the row.</summary>
         protected Control ComboRow(SymbolRegular icon, string title, string? hint, IReadOnlyList<Choice> choices,
             Func<string> get, Action<string> set, Panel? into = null, double width = 240, Action? changed = null,
-            Func<Choice, bool>? enabled = null)
+            Func<Choice, bool>? enabled = null, Control? accessory = null)
         {
             TextBlock note = null!;
             void ShowNote(int index)
@@ -585,7 +585,7 @@ namespace BloodborneLauncher.Views
 
             var options = string.Join(" · ", choices.Select(c => c.Label));
             var shortLabels = choices.Sum(c => Segmented.Short(c.Label).Length);
-            if (!SettingRow.Classic && choices.Count is >= 2 and <= 6 && shortLabels <= 72)
+            if (accessory == null && !SettingRow.Classic && choices.Count is >= 2 and <= 6 && shortLabels <= 72)
             {
                 var segmented = new Segmented(choices, enabled);
                 var row = Add(Card(icon, title, hint, segmented, out note, wide: true), into);
@@ -605,7 +605,7 @@ namespace BloodborneLauncher.Views
                 box.Items.Add(item);
             }
             ComboSearch.Attach(box);
-            var card = Add(Card(icon, title, hint, box, out note), into);
+            var card = Add(Card(icon, title, hint, accessory == null ? box : Row(box, accessory), out note), into);
             card.Choices = options;
             box.SelectedIndex = Core.Choices.IndexOf(choices, get());
             ShowNote(box.SelectedIndex);
@@ -646,7 +646,8 @@ namespace BloodborneLauncher.Views
         /// away) to set it exactly. The value is kept in the slider's range and on its steps; text that
         /// is not a number puts the current value back. Every slider in the launcher is made here.</summary>
         protected Slider SliderRow(SymbolRegular icon, string title, string? hint, double min, double max, double step,
-            Func<double> get, Action<double> set, string format = "0.00", Panel? into = null, double valueWidth = 44)
+            Func<double> get, Action<double> set, string format = "0.00", Panel? into = null, double valueWidth = 44,
+            double defaultValue = 1.0)
         {
             var slider = new Slider
             {
@@ -703,7 +704,15 @@ namespace BloodborneLauncher.Views
                 set(slider.Value);
                 Ws.SaveSoon();
             };
-            Add(Card(icon, title, hint, Row(slider, value), out _), into);
+            var reset = IconButton(SymbolRegular.ArrowReset24,
+                L.F($"Reset to default: {defaultValue.ToString(format, culture)}"), (_, _) =>
+                {
+                    slider.Value = Math.Clamp(defaultValue, min, max);
+                    Show();
+                    set(slider.Value);
+                    Ws.SaveSoon();
+                });
+            Add(Card(icon, title, hint, Row(slider, value, reset), out _), into);
             return slider;
         }
 
