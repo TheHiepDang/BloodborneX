@@ -1,10 +1,15 @@
 #Requires -Version 7.4
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Release,[Parameter(Mandatory)][string]$Version,[Parameter(Mandatory)][string]$ExpectedEngineHash)
+param(
+    [Parameter(Mandatory)][string]$Release,
+    [Parameter(Mandatory)][string]$Version,
+    [Parameter(Mandatory)][string]$ExpectedEngineHash,
+    [ValidateSet('LanternEngine','BloodbornePC')][string]$ArtifactPrefix = 'LanternEngine'
+)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $root=(Resolve-Path -LiteralPath $Release).Path
-$package=Join-Path $root 'LanternEngine'
+$package=Join-Path $root $ArtifactPrefix
 $checks=[Collections.Generic.List[string]]::new()
 function Check([bool]$Condition,[string]$Name) { if (!$Condition) { throw "Release check failed: $Name" };$checks.Add($Name);Write-Host "PASS: $Name" }
 $metadata=Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw | ConvertFrom-Json
@@ -15,7 +20,7 @@ Check (($info.ProductVersion -split '\+')[0] -eq $Version -and ([version]$info.F
 Check ((Get-FileHash -LiteralPath (Join-Path $package 'engine\out\bb-probe.exe')).Hash -eq $ExpectedEngineHash) 'Package contains the engine compiled in this run'
 Check ((Get-Content -LiteralPath (Join-Path $package 'LOCAL-NR-RELEASE') -First 1) -eq $Version) 'NR marker matches the release version'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$expectedArchives=@("LanternEngine-$Version-win64.zip","LanternEngine-$Version-source.zip")
+$expectedArchives=@("$ArtifactPrefix-$Version-win64.zip","$ArtifactPrefix-$Version-source.zip")
 $checksumLines=@(Get-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt'))
 Check ($checksumLines.Count -eq 2) 'Exactly two archive checksums'
 foreach ($line in $checksumLines) {
@@ -62,5 +67,5 @@ foreach ($name in $expectedArchives) {
         }
     } finally { $zip.Dispose() }
 }
-@{version=$Version;tag="v$Version";engine_sha256=$ExpectedEngineHash;checks=@($checks);gameplay_tested=$false} |
+@{version=$Version;tag="v$Version";artifact_prefix=$ArtifactPrefix;engine_sha256=$ExpectedEngineHash;checks=@($checks);gameplay_tested=$false} |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $root 'PACKAGE-CHECKS.json') -Encoding utf8

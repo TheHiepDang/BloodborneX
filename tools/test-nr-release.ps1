@@ -1,6 +1,9 @@
 # Non-game portable-package smoke tests. Extracts to a fresh temporary path with spaces.
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Release)
+param(
+    [Parameter(Mandatory)][string]$Release,
+    [ValidateSet('LanternEngine','BloodbornePC')][string]$ArtifactPrefix = 'LanternEngine'
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $releaseDir = (Resolve-Path $Release).Path
@@ -15,7 +18,7 @@ $checks.Add('Portable and source ZIP SHA-256 checksums match.')
 $archives = @(Get-ChildItem $releaseDir -File -Filter '*-win64.zip')
 if ($archives.Count -ne 1) { throw 'Expected exactly one Windows package ZIP' }
 Expand-Archive -LiteralPath $archives[0].FullName -DestinationPath $testDir
-$package = Join-Path $testDir 'LanternEngine'
+$package = Join-Path $testDir $ArtifactPrefix
 $manifestLines = @(Get-Content (Join-Path $package 'FILES-SHA256.txt'))
 foreach ($line in $manifestLines) {
     if ($line -notmatch '^([A-Fa-f0-9]{64})  (.+)$') { throw 'Malformed file manifest' }

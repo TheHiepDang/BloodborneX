@@ -15,9 +15,12 @@ Requirements: Windows, PowerShell 7.4+, .NET SDK 8+, Git, and the existing MSYS2
 ```powershell
 & '.\Prepare Release.ps1' -Version 1.0.2 -EngineSource 'C:\path\to\engine' -NoPrompt
 & '.\Prepare Release.ps1' -Version 1.0.2 -EngineSource 'C:\path\to\engine' -CheckOnly -NoPrompt
+& '.\Prepare Release.ps1' -Version 1.0.3 -ArtifactPrefix BloodbornePC -EngineSource 'C:\path\to\engine' -NoPrompt
 ```
 
 Optional arguments include `-ReleaseNotesPath`, `-MsysRoot`, `-CachedDownloads`, `-ReleaseRoot`, `-BuildDrive` and `-Jobs`. `-CheckOnly` checks inputs/tools without compiling or writing configuration. A supplied notes file is used verbatim. Otherwise a short versioned note is generated. Downloads are reused from earlier release caches when available; pinned Python/DLSS SR hashes are still checked.
+
+The default archive prefix remains `LanternEngine` for compatibility. When the planned naming transition begins, pass `-ArtifactPrefix BloodbornePC`; the builder, verifier, checksums, and upload folder will then all use `BloodbornePC-<version>-win64.zip` and `BloodbornePC-<version>-source.zip`. Do not rename archives after packaging.
 
 The lower-level `tools/build-nr-release.ps1` packages already-built outputs. Prefer the root script for routine releases because it compiles first and validates the result. `tools/verify-nr-release.ps1` checks embedded version, exact external/internal metadata, fresh-engine hash, both archive checksums, every archived file hash, full manifest coverage and prohibited files. `tools/test-nr-release.ps1` tests portable startup/imports/render-size preparation and native/GPU capability loading without launching the game. Validation reports describe only checks actually performed.
 

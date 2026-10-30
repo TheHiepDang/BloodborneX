@@ -8,7 +8,8 @@ param(
     [string]$ReleaseNotesPath = '',
     [string]$MsysRoot = 'C:\msys64',
     [string]$CachedDownloads = '',
-    [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\releases')
+    [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\releases'),
+    [ValidateSet('LanternEngine','BloodbornePC')][string]$ArtifactPrefix = 'LanternEngine'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -25,7 +26,7 @@ foreach ($file in @('bb-probe.exe','bb-gpu-capabilities.exe','bb-engine-assets.e
     if (!(Test-Path -LiteralPath (Join-Path $out $file))) { throw "Missing tested engine output: $file" }
 }
 New-Item -ItemType Directory -Path $release | Out-Null
-$package = Join-Path $release 'LanternEngine'
+$package = Join-Path $release $ArtifactPrefix
 $build = Join-Path $release 'build'
 $cache = Join-Path $release 'downloads'
 foreach ($dir in @($package,$build,$cache)) { New-Item -ItemType Directory -Path $dir | Out-Null }
@@ -129,7 +130,7 @@ try {
     foreach ($name in @('DLSSNR-HANDOFF.md','NR-RC1.md','NR-RC2.md','RELEASING.md')) {
         Copy-One (Join-Path $repo "docs\$name") (Join-Path $package "docs\$name")
     }
-    $startText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'nr-start-here.template.md')).Replace('{{VERSION}}',$Version).Replace('{{BUILD_DATE}}',[DateTimeOffset]::UtcNow.ToString('yyyy-MM-dd')+' UTC')
+    $startText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'nr-start-here.template.md')).Replace('{{VERSION}}',$Version).Replace('{{ARTIFACT_PREFIX}}',$ArtifactPrefix).Replace('{{BUILD_DATE}}',[DateTimeOffset]::UtcNow.ToString('yyyy-MM-dd')+' UTC')
     $releaseKind = if ($Version.Contains('-nr.rc')) { 'prerelease' } else { 'stable release' }
     $startText = $startText.Replace('{{RELEASE_KIND}}',$releaseKind)
     [IO.File]::WriteAllText((Join-Path $package 'START-HERE.md'),$startText,[Text.UTF8Encoding]::new($false))
@@ -151,7 +152,7 @@ try {
         repository_head=(& git -C $repo rev-parse HEAD); dirty_source=$true;
         engine_upstream='https://github.com/DarkIzuku/bloodborne_pc'; engine_base='8ecba9a4abdd54747e31d7fee54982e422b5f8e2';
         engine_patch_sha256=(Get-FileHash (Join-Path $repo 'engine\bbhost-changes.patch')).Hash;
-        supplemental_engine_patches=@($supplemental); applied_engine_snapshot='LanternEngine-source/engine-source';
+        artifact_prefix=$ArtifactPrefix; supplemental_engine_patches=@($supplemental); applied_engine_snapshot="$ArtifactPrefix-source/engine-source";
         fixes=@('FSR FG transient allocation retirement','RTX 50 original NR runtime selection','NR Performance model scaling','Consistent stable release version and updater assets');
         tested_engine_outputs=$engineHashes; downloads=$script:downloads;
         nr_runtime_included=$false; startup='bundled Python; native bb-start intentionally omitted';
@@ -160,7 +161,7 @@ try {
     }
     $provenance | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $package 'BUILD-PROVENANCE.json') -Encoding utf8
     # Source snapshot includes uncommitted final sources, but excludes ignored binaries/runtime/user data.
-    $source = Join-Path $release 'LanternEngine-source'
+    $source = Join-Path $release "$ArtifactPrefix-source"
     function Copy-GitSource([string]$From,[string]$To) {
         if (Test-Path -LiteralPath (Join-Path $From '.git')) {
             $files = & git -C $From -c core.quotepath=false ls-files --cached --others --exclude-standard
@@ -230,7 +231,7 @@ included. Packaging scripts are in BloodborneX/tools.
         $manifest | Set-Content (Join-Path $tree 'FILES-SHA256.txt') -Encoding utf8
     }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    foreach ($entry in @(@($package,"LanternEngine-$Version-win64.zip"), @($source,"LanternEngine-$Version-source.zip"))) {
+    foreach ($entry in @(@($package,"$ArtifactPrefix-$Version-win64.zip"), @($source,"$ArtifactPrefix-$Version-source.zip"))) {
         [IO.Compression.ZipFile]::CreateFromDirectory($entry[0],(Join-Path $release $entry[1]),[IO.Compression.CompressionLevel]::Optimal,$true)
     }
     Get-ChildItem $release -File -Filter '*.zip' | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName).Hash,$_.Name } |

@@ -34,6 +34,14 @@ using var document = JsonDocument.Parse("""
 var parse = typeof(Updater).GetMethod("Parse",BindingFlags.Static|BindingFlags.NonPublic)!;
 var release = (Updater.Release)parse.Invoke(null,new object[] {document.RootElement})!;
 Check(release.ZipUrl == "https://invalid/windows", "Select Windows runtime ZIP, not source or Linux");
+using var bloodbornePcDocument = JsonDocument.Parse("""
+{"tag_name":"v1.0.3","html_url":"https://github.com/TheHiepDang/BloodborneX/releases/tag/v1.0.3","assets":[
+ {"name":"BloodbornePC-1.0.3-source.zip","browser_download_url":"https://invalid/source-pc","size":123},
+ {"name":"BloodbornePC-1.0.3-win64.zip","browser_download_url":"https://invalid/windows-pc","size":456},
+ {"name":"package.json","browser_download_url":"https://invalid/package-pc","size":123}]}
+""");
+var bloodbornePcRelease = (Updater.Release)parse.Invoke(null,new object[] { bloodbornePcDocument.RootElement })!;
+Check(bloodbornePcRelease.ZipUrl == "https://invalid/windows-pc", "Select BloodbornePC Windows runtime ZIP");
 using var stableDocument = JsonDocument.Parse("""
 {"tag_name":"v1.0.1","name":"v1.0.1","html_url":"https://github.com/TheHiepDang/BloodborneX/releases/tag/v1.0.1","assets":[
  {"name":"LanternEngine-1.0.1-source.zip","browser_download_url":"https://invalid/source","size":123},

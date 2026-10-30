@@ -5,7 +5,7 @@ version. The launcher, package metadata, ZIP name and release tag agree on it.
 
 ## Start here
 
-1. Extract the entire `LanternEngine-{{VERSION}}-win64.zip` to a writable folder.
+1. Extract the entire `{{ARTIFACT_PREFIX}}-{{VERSION}}-win64.zip` to a writable folder.
    Keep it separate from older engine packages. Do not run inside the ZIP.
 2. Run **Lantern Engine.exe**, select your own decrypted Bloodborne 1.09 game
    folder, and explicitly choose your existing saves folder if continuing a save.
