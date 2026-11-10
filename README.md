@@ -7,16 +7,10 @@ BloodborneX is a direct fork of [Awakenchan's Lantern Engine](https://github.com
 ## Install
 
 1. Download the Windows package from the [latest release](https://github.com/TheHiepDang/BloodborneX/releases/latest) and unzip it.
-2. Supply your own runtime at **`dlss/nvngx_dlssnr.dll`**. Choose the unmodified October 16 DLL for **GeForce RTX 50-series**, or the **openNR FP16 compatibility** DLL for other RTX cards. Install one DLL directly in `dlss/`; the engine detects the GPU for runtime handling. The DLL is **not included**. See [accepted builds and hashes](docs/NR-RELEASE.md).
+2. Supply your own runtime at **`dlss/nvngx_dlssnr.dll`**. For RTX 30s, I recommend you pick the dll from here: https://github.com/lmxxf/DLSS5-RTX-3080-laptop
 3. Run `Lantern Engine.exe`, select your game folder, and press **Play**. Enable Neural Rendering in the DLSS settings (Insert or L3 + R3).
 
 See [release notes](docs/NR-RELEASE.md) for requirements and limitations, or the [development handoff](docs/DLSSNR-HANDOFF.md) for technical context.
-
-## Prepare a release
-
-Double-click **Prepare Release.cmd** in the project root. Enter the new version and a short description. The first run also asks for the applied engine source folder (the folder with `build.sh`); it remembers that path locally. PowerShell 7.4+, .NET SDK 8+ and MSYS2 CLANG64 build dependencies are required.
-
-The script compiles the engine and launcher, verifies matching versions and metadata, runs package checks, and creates **`releases/<version>/Upload`**. Upload every file in that folder without renaming anything. It does not publish automatically or replace your game installation. See [release preparation](docs/RELEASING.md).
 
 ## Video showcase
 
