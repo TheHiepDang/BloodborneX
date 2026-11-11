@@ -1,33 +1,16 @@
 # BloodborneX
 
-BloodborneX is a direct fork of [Awakenchan's Lantern Engine](https://github.com/Awakenchan/LanternEngine), adding experimental native Vulkan DLSS Neural Rendering on Windows. This is a changed, unofficial fork. The original launcher and engine work are by Awakenchan and the upstream contributors.
-
-Lantern Engine by Awaken (https://github.com/Awakenchan/LanternEngine)
+BloodborneX is a direct fork of [Awakenchan's Lantern Engine](https://github.com/Awakenchan/LanternEngine), adding experimental native Vulkan DLSS Neural Rendering on Windows. The original launcher and engine work are by Awakenchan and the upstream contributors.
 
 **No game files are included.** You need your own decrypted Bloodborne dump (CUSA03173) with update 1.09.
 
 ## Install
 
-1. Download **`BloodbornePC-1.0.3-win64.zip`** from the [latest release](https://github.com/TheHiepDang/BloodborneX/releases/latest) and extract the entire **BloodbornePC** folder to a writable location.
-2. Run **`BloodbornePC.exe`**, select your own decrypted Bloodborne 1.09 game folder and existing save location, then press **Play**.
-3. For optional Neural Rendering, supply your own **`dlss/nvngx_dlssnr.dll`** and enable it under **NR** in the launcher or the in-game menu (**Insert / L3+R3**). The model is never bundled or downloaded. Custom builds are always allowed; missing exports or failed initialization/evaluation fall back to ordinary DLSS. Extra neural style additionally requires a compatible tensor layout.
+1. Download the Windows package from the [latest release](https://github.com/TheHiepDang/BloodborneX/releases/latest) and unzip it.
+2. Supply your own runtime at **`dlss/nvngx_dlssnr.dll`**. For RTX 30s, I recommend you pick the dll from here: https://github.com/lmxxf/DLSS5-RTX-3080-laptop
+3. Run `Lantern Engine.exe`, select your game folder, and press **Play**. Enable Neural Rendering in the DLSS settings (Insert or L3 + R3).
 
-For RTX 30-series, the project's runtime recommendation is [DLSS5-RTX-3080-laptop](https://github.com/lmxxf/DLSS5-RTX-3080-laptop). Supply the model yourself; it is not included.
-
-## What's new in v1.0.3
-
-- Separate NR page, expanded look/detail/colour/stability controls and live Extra neural style.
-- Right-aligned **Spec preset** tab, two provided RTX 3070 profiles, and multiple custom presets with selective save/export/import and delete confirmation.
-- Read-only preset selection view with a fixed header, grouped settings and visible inclusion/exclusion indicators.
-- BloodborneX product branding and **BloodbornePC** distribution names.
-
-See [v1.0.3 notes](https://github.com/TheHiepDang/BloodborneX/releases/tag/v1.0.3) for details and validation limits. NR, frame generation and HDR remain experimental; build/portable tests do not establish gameplay stability on every GPU.
-
-## Automatic updates and naming
-
-**BloodbornePC is the distribution name; BloodborneX remains the project name.** The published v1.0.1/v1.0.2 updater already recognizes `BloodbornePC-*-win64.zip`, so existing installations can discover v1.0.3. This release does not require a second legacy-named ZIP.
-
-`BloodbornePC.exe` is the new entry point. The internal `Lantern Engine.exe` and `Bloodborne Launcher.exe` names remain deliberately compatible with old updater executable discovery and shortcuts. Existing configuration filenames, per-user storage locations and the `lantern-native-nr-` metadata family remain unchanged. New versions continue accepting the older archive prefixes as well.
+See [release notes](docs/NR-RELEASE.md) for requirements and limitations, or the [development handoff](docs/DLSSNR-HANDOFF.md) for technical context.
 
 ## Video showcase
 
