@@ -274,7 +274,7 @@ namespace BloodborneLauncher.Views
                     _title.Text = L.T("Set up your game");
                     _intro.Text = L.T("This guide checks your Bloodborne files one step at a time, says what each part is for, and what to do when something is missing. It takes a minute or two.") + "\n\n" +
                                   L.T("What you need:") + "\n" +
-                                  L.T("•  Bloodborne dumped from your own PS4: a folder with eboot.bin, sce_sys and dvdroot_ps4 inside. Lantern Engine does not come with the game.") + "\n" +
+                                  L.T("•  Bloodborne dumped from your own PS4: a folder with eboot.bin, sce_sys and dvdroot_ps4 inside. BloodborneX does not come with the game.") + "\n" +
                                   L.T("•  The 1.09 update, dumped from your PS4 too (unless your dump has it already).") + "\n" +
                                   L.T("•  About 40 GB free, on an SSD if you can: the game loads its world from the disk as you play.") + "\n\n" +
                                   L.T("Nothing is downloaded, and the launcher only changes your game files when you press a button that says so.");
@@ -301,7 +301,7 @@ namespace BloodborneLauncher.Views
 
                 case Step.Version:
                     _title.Text = L.T("2. Game version");
-                    _intro.Text = L.T("Bloodborne comes in several editions (each region has its own code, such as CUSA03173) and was updated after release. Lantern Engine is made for version 1.09, the last update: its frame rate, resolution and engine patches only fit that version.") + "\n\n" +
+                    _intro.Text = L.T("Bloodborne comes in several editions (each region has its own code, such as CUSA03173) and was updated after release. BloodborneX is made for version 1.09, the last update: its frame rate, resolution and engine patches only fit that version.") + "\n\n" +
                                   L.T("The update is dumped from the PS4 apart from the game, as a folder of its own with its own eboot.bin and sce_sys (often named CUSA03173-patch).");
                     if (!NeedsGame()) break;
                     Lines(SetupStep.Version);

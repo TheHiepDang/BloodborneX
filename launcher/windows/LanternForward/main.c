@@ -22,7 +22,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR arguments, int
     if (!CreateProcessW(launcher, line, NULL, NULL, FALSE, 0, NULL, folder, &startup, &process)) {
         MessageBoxW(NULL, L"Lantern Engine.exe was not found in this folder.\n\n"
                           L"Download the latest release and unpack it over this folder.",
-                    L"Lantern Engine", MB_OK | MB_ICONERROR);
+                    L"BloodborneX", MB_OK | MB_ICONERROR);
         return 1;
     }
     CloseHandle(process.hThread);

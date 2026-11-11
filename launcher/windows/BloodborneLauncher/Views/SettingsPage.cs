@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -26,7 +26,7 @@ namespace BloodborneLauncher.Views
         private readonly StackPanel _themeColour = new(), _picture = new();
         private TextBlock _pictureHint = null!;
 
-        public SettingsPage() : base(L.T("Settings"), L.T("The Lantern Engine, how the game is started, and keeping this launcher up to date."))
+        public SettingsPage() : base(L.T("Settings"), L.T("The BloodborneX, how the game is started, and keeping this launcher up to date."))
         {
             Group(L.T("Appearance"));
             ComboRow(SymbolRegular.LocalLanguage24, L.T("Launcher language"), L.T("Restart the launcher to apply the language."),
@@ -123,7 +123,7 @@ namespace BloodborneLauncher.Views
                 "ui_window_buttons_side", changed: () => MainWindow.Instance?.ApplyWindowButtons());
             ShowAppearance();
 
-            Group("Lantern Engine");
+            Group("BloodborneX");
             Add(Card(SymbolRegular.FolderLink24, L.T("Engine folder"), "", Row(
                 SmallButton(L.T("Browse"), SymbolRegular.FolderOpen24, (_, _) => ChoosePort()),
                 IconButton(SymbolRegular.Open24, L.T("Open in Explorer"), (_, _) => Paths.OpenFolder(Paths.PortDir)),
@@ -236,7 +236,7 @@ namespace BloodborneLauncher.Views
             TextRow(SymbolRegular.Link24, L.T("Picture link"), L.T("An https link to a PNG, JPG or GIF: Discord downloads it, so a file on your PC can't be used"),
                 "https://…", () => S.Str("discord_image_url"), v => { S.Set("discord_image_url", v); DiscordChanged(); }, discordLink, 380);
             discordCustom.Children.Add(discordLink);
-            DiscordText(L.T("Picture hover text"), "Lantern Engine", "discord_image_text");
+            DiscordText(L.T("Picture hover text"), "BloodborneX", "discord_image_text");
             DiscordText(L.T("Small badge link"), L.T("Optional https link"), "discord_badge_url", L.T("A small round picture on the corner of the big one"));
             DiscordText(L.T("Badge hover text"), L.T("Optional"), "discord_badge_text");
             ToggleRow(SymbolRegular.Timer24, L.T("Show play time"), null, () => S.Bool("discord_timer"), v => S.Set("discord_timer", v), discordCustom, DiscordChanged);
@@ -454,7 +454,7 @@ namespace BloodborneLauncher.Views
             var dialog = new Microsoft.Win32.SaveFileDialog
             {
                 Title = L.T("Export shader catalog"), Filter = L.T("Shader catalog|*.zip"),
-                FileName = "Lantern Engine shader catalog.zip",
+                FileName = "BloodborneX shader catalog.zip",
             };
             if (dialog.ShowDialog() != true) return;
             try
@@ -531,7 +531,7 @@ namespace BloodborneLauncher.Views
 
         private void SaveSettingsFile()
         {
-            var dialog = new Microsoft.Win32.SaveFileDialog { Title = L.T("Save settings"), FileName = "Lantern Engine settings.json", Filter = L.T("Settings|*.json") };
+            var dialog = new Microsoft.Win32.SaveFileDialog { Title = L.T("Save settings"), FileName = "BloodborneX settings.json", Filter = L.T("Settings|*.json") };
             if (dialog.ShowDialog() != true) return;
             try
             {

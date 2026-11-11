@@ -86,6 +86,12 @@ credited in the code.
 
 ## Build
 
+For the v1.0.3 native NR look controls and their matching launcher,
+see [`docs/NR-RELEASE.md`](../docs/NR-RELEASE.md). Its supplemental
+`nr-look-controls.patch` targets the applied source identified by
+`nr-look-controls-baseline.json`; check those file hashes before applying it.
+It is not incorporated into the historical cumulative patch below.
+
 In the MSYS2 **CLANG64** shell (packages as in the engine's README):
 
 ```bash

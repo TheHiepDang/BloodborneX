@@ -19,3 +19,22 @@ launcher/windows/install.txt
 # Local release-builder configuration and intermediates.
 /.release-settings.json
 /.release-work/
+
+# Private agent instructions, research and local diagnostics.
+[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
+/agents_space/
+/.agents/
+/.codex/
+/BloodborneX-RenoDX-NR-analysis.md
+/docs/NR-*-TEST.md
+/docs/NR-*-BUILD-VALIDATION.md
+/docs/NR-EXTRA-STYLE-ANALYSIS.md
+/tools/Shadow Capture.cmd
+/tools/shadow-capture.ps1
+/tools/nr-style-test-default.ini
+
+# Personal settings and secrets.
+.env
+.env.*
+*.bbxpreset
+docs/*

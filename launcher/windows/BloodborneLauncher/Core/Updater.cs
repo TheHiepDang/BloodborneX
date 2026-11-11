@@ -192,9 +192,11 @@ namespace BloodborneLauncher.Core
                 if (spaced.Equals(ExeName, StringComparison.OrdinalIgnoreCase) ||
                     (exe == null && spaced.Equals(OldExeName, StringComparison.OrdinalIgnoreCase)))
                     (exe, exeSize) = (url, size);
-                else if ((name.StartsWith("LanternEngine-", StringComparison.OrdinalIgnoreCase) ||
+                else if ((name.StartsWith("BloodborneX-", StringComparison.OrdinalIgnoreCase) ||
+                          name.StartsWith("LanternEngine-", StringComparison.OrdinalIgnoreCase) ||
                           name.StartsWith("BloodbornePC-", StringComparison.OrdinalIgnoreCase)) &&
-                         name.EndsWith("-win64.zip", StringComparison.OrdinalIgnoreCase) && zip == null)
+                         name.EndsWith("-win64.zip", StringComparison.OrdinalIgnoreCase) &&
+                         (zip == null || name.StartsWith("BloodborneX-", StringComparison.OrdinalIgnoreCase)))
                     (zip, zipSize) = (url, size);
                 else if (name.Equals(PackageFile, StringComparison.OrdinalIgnoreCase))
                     package = url;

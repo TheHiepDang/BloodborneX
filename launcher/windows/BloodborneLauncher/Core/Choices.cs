@@ -160,7 +160,7 @@
         public static readonly Choice[] DlssNrPresets =
         {
             new(L.T("Default (recommended)"), "0"),
-            new("Preset 1", "1"), new("Preset 2", "2"), new("Preset 3", "3"),
+            new("Preset 1 (Old/HT)", "1"), new("Preset 2 (New)", "2"), new("Preset 3", "3"),
         };
 
         public static readonly Choice[] DlssNrStyles =

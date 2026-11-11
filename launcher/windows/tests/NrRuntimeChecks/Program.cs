@@ -36,6 +36,7 @@ try {
     Check(DlssNrRuntime.DirectoryName==Path.Combine(Paths.EngineDir,"dlss"),"engine flat root fallback");
     File.WriteAllText(Path.Combine(temporary,"dlss","nvngx_dlssnr.dll"),"test");
     Check(DlssNrRuntime.DirectoryName==Path.Combine(temporary,"dlss"),"package flat root preferred");
+    Check(DlssNrRuntime.Status().Contains("Custom hashes are always allowed"),"custom runtime is permitted without any switch");
 } finally {
     Directory.Delete(temporary,true); Paths.DataDir=""; Paths.EngineDir="";
 }
@@ -43,10 +44,9 @@ foreach (var path in args) {
     using var stream=File.OpenRead(path);
     var hash=Convert.ToHexString(SHA256.HashData(stream));
     var identity=DlssNrRuntime.Identify(stream.Length,hash);
-    Check(identity!=DlssNrRuntime.RuntimeBuild.Unknown,"actual supplied file rejected");
     Console.WriteLine($"Actual DLL: {identity}, {stream.Length} bytes, SHA256 {hash}");
 }
-Console.WriteLine("PASS: both exact NR builds; mutations, mismatched size/hash, and unknown files rejected.");
+Console.WriteLine("PASS: exact identities classified for diagnostics; custom runtime hashes always allowed; single flat runtime path.");
 
 namespace BloodborneLauncher.Core {
     public static class Paths { public static string DataDir="";public static string EngineDir=""; }

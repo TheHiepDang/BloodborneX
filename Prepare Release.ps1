@@ -7,7 +7,7 @@ param(
     [string]$ReleaseNotesPath,
     [string]$CachedDownloads,
     [string]$ReleaseRoot = (Join-Path $PSScriptRoot 'releases'),
-    [ValidateSet('LanternEngine','BloodbornePC')][string]$ArtifactPrefix = 'LanternEngine',
+    [ValidateSet('BloodborneX','LanternEngine','BloodbornePC')][string]$ArtifactPrefix = 'BloodbornePC',
     [ValidatePattern('^[D-Zd-z]$')][string]$BuildDrive = 'N',
     [ValidateRange(1,64)][int]$Jobs = 4,
     [switch]$NoPrompt,
@@ -125,6 +125,7 @@ New-Item -ItemType Directory -Path $upload | Out-Null
 foreach ($name in @("$ArtifactPrefix-$Version-win64.zip","$ArtifactPrefix-$Version-source.zip",'package.json','SHA256SUMS.txt','RELEASE-NOTES.md','VALIDATION.md','PACKAGE-CHECKS.json')) {
     Copy-Item -LiteralPath (Join-Path $release $name) -Destination (Join-Path $upload $name)
 }
+if ($ArtifactPrefix -eq 'BloodborneX') { Copy-Item -LiteralPath (Join-Path $release "LanternEngine-$Version-win64.zip") -Destination $upload }
 $prerelease = $Version.Contains('-nr.rc')
 @("Release ready: $Version","GitHub tag and title: v$Version",$(if ($prerelease) { 'Release type: prerelease' } else { 'Release type: stable/latest' }),
     '', 'Upload EVERY file in this Upload folder together. Keep the original filenames.',

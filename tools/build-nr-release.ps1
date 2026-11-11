@@ -6,15 +6,18 @@ param(
     [string]$Version = '1.0.1',
     [string]$ReleaseNotesFile = 'NR-1.0.1.md',
     [string]$ReleaseNotesPath = '',
+    [string]$SettingsTemplate = '',
     [string]$MsysRoot = 'C:\msys64',
     [string]$CachedDownloads = '',
     [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\releases'),
-    [ValidateSet('LanternEngine','BloodbornePC')][string]$ArtifactPrefix = 'LanternEngine'
+    [ValidateSet('BloodborneX','LanternEngine','BloodbornePC')][string]$ArtifactPrefix = 'BloodbornePC'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'release-file-policy.ps1')
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $engine = (Resolve-Path $EngineSource).Path
+$defaults = if ($SettingsTemplate) { (Resolve-Path -LiteralPath $SettingsTemplate).Path } else { Join-Path $PSScriptRoot 'nr-release-default.ini' }
 $release = Join-Path ([IO.Path]::GetFullPath($ReleaseRoot)) $Version
 if ($Version -notmatch '^\d+\.\d+\.\d+(-nr\.rc\d+)?$') { throw 'Expected a stable version such as 1.0.1 or an NR candidate such as 0.9.9-nr.rc2' }
 $notes = if ($ReleaseNotesPath) { [IO.Path]::GetFullPath($ReleaseNotesPath) } else { Join-Path $repo ("docs\$ReleaseNotesFile") }
@@ -64,7 +67,7 @@ try {
     $actualVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $publish 'Lantern Engine.exe')).ProductVersion
     if (($actualVersion -split '\+')[0] -ne $Version) { throw "Compiled launcher version $actualVersion does not match requested release $Version" }
     Copy-One (Join-Path $publish 'Lantern Engine.exe') (Join-Path $package 'Lantern Engine.exe')
-    foreach ($forward in @(@('BloodbornePlay','play.rc','Bloodborne.exe'), @('LanternForward','forward.rc','Bloodborne Launcher.exe'))) {
+    foreach ($forward in @(@('BloodbornePlay','play.rc','Bloodborne.exe'), @('LanternForward','forward.rc','Bloodborne Launcher.exe'), @('LanternForward','forward.rc','BloodbornePC.exe'))) {
         Push-Location (Join-Path $repo "launcher\windows\$($forward[0])")
         try {
             $res = Join-Path $build "$($forward[0]).res"
@@ -89,8 +92,8 @@ try {
     }
     Copy-One (Join-Path $engine 'data\image_109_hashes.txt') (Join-Path $package 'engine\data\image_109_hashes.txt')
     Copy-One (Join-Path $engine 'scripts\image_109_hashes.txt') (Join-Path $package 'engine\scripts\image_109_hashes.txt')
-    Copy-One (Join-Path $PSScriptRoot 'nr-release-default.ini') (Join-Path $package 'lantern.ini')
-    Copy-One (Join-Path $PSScriptRoot 'nr-release-default.ini') (Join-Path $package 'engine\lantern.default.ini')
+    Copy-One $defaults (Join-Path $package 'lantern.ini')
+    Copy-One $defaults (Join-Path $package 'engine\lantern.default.ini')
     # Resolve the native dependency closure rather than assuming MSYS2 is installed on the player PC.
     $queue = [Collections.Generic.Queue[string]]::new()
     Get-ChildItem $package -Recurse -File | Where-Object Extension -In '.exe','.dll' | ForEach-Object { $queue.Enqueue($_.FullName) }
@@ -143,7 +146,7 @@ try {
     Copy-One (Join-Path $repo 'README.md') (Join-Path $package 'README.md')
     Copy-One $notes (Join-Path $package 'RELEASE-NOTES.md')
     Copy-One $notes (Join-Path $release 'RELEASE-NOTES.md')
-    $supplemental = @('frame-generation-memory-fix.patch','nr-runtime-compatibility-fix.patch') | ForEach-Object {
+    $supplemental = @('frame-generation-memory-fix.patch','nr-runtime-compatibility-fix.patch','nr-look-controls.patch') | ForEach-Object {
         @{name=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $repo "engine\$_")).Hash}
     }
 
@@ -156,6 +159,7 @@ try {
         fixes=@('FSR FG transient allocation retirement','RTX 50 original NR runtime selection','NR Performance model scaling','Consistent stable release version and updater assets');
         tested_engine_outputs=$engineHashes; downloads=$script:downloads;
         nr_runtime_included=$false; startup='bundled Python; native bb-start intentionally omitted';
+        settings_template_sha256=(Get-FileHash -LiteralPath $defaults).Hash;
         optional_assets_omitted=@('Streamline/DLSS-G','FSR4/FSR4.1.1','bbbridge online helper');
         toolchain=(& (Join-Path $bin 'clang.exe') --version | Select-Object -First 1)
     }
@@ -191,8 +195,9 @@ try {
             }
         }
         foreach ($relative in $files | Select-Object -Unique) {
+            if (Test-PrivateReleasePath $relative) { continue }
             $file = Join-Path $From $relative
-            if ((Test-Path -LiteralPath $file -PathType Leaf) -and !$file.StartsWith($release+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -and $relative -notmatch '(^|/)(nvngx_dlssnr\.dll|releases)(/|$)') {
+            if ((Test-Path -LiteralPath $file -PathType Leaf) -and !$file.StartsWith($release+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -and $relative -notmatch '(^|/)(nvngx_dlssnr\.dll|releases|agents_space)(/|$)' -and $relative -ne 'BloodborneX-RenoDX-NR-analysis.md' -and $relative -notmatch '\.bbxpreset$') {
                 Copy-One $file (Join-Path $To $relative)
             }
         }
@@ -202,7 +207,7 @@ try {
     foreach ($submodule in @('gpu/third_party/fsr-vulkan','gpu/third_party/imgui','third_party/LibAtrac9')) {
         Copy-GitSource (Join-Path $engine $submodule) (Join-Path $source "engine-source/$submodule")
     }
-    foreach ($helper in @('build-nr-release.ps1','nr-release-default.ini','copy-nr-notices.ps1','build-release-engine.sh','start-release.ps1','verify-nr-release.ps1','test-nr-release.ps1','nr-start-here.template.md')) {
+    foreach ($helper in @('build-nr-release.ps1','nr-release-default.ini','copy-nr-notices.ps1','build-release-engine.sh','start-release.ps1','verify-nr-release.ps1','test-nr-release.ps1','nr-start-here.template.md','release-file-policy.ps1','test-release-file-policy.ps1')) {
         Copy-One (Join-Path $PSScriptRoot $helper) (Join-Path $source "BloodborneX/tools/$helper")
     }
     @'
@@ -220,8 +225,9 @@ included. Packaging scripts are in BloodborneX/tools.
     Copy-One (Join-Path $package 'BUILD-PROVENANCE.json') (Join-Path $source 'BUILD-PROVENANCE.json')
     # The only binaries allowed in the portable tree are explicitly built/copied above.
     $forbidden = Get-ChildItem $package,$source -Recurse -File | Where-Object {
+        (Test-PrivateReleasePath ([IO.Path]::GetRelativePath($release,$_.FullName))) -or
         $_.Name -match '^(nvngx_dlssnr\.dll|eboot\..*|boot.*\.bin|prepared\.json|game_dir\.txt|msys-2\.0\.dll)$' -or
-        $_.Extension -in '.pdb','.dmp','.log','.orig','.bak','.old'
+        $_.Extension -in '.pdb','.dmp','.log','.orig','.bak','.old','.bbxpreset'
     }
     if ($forbidden) { throw "Forbidden release content: $($forbidden[0].FullName)" }
     foreach ($tree in @($package,$source)) {
@@ -234,6 +240,8 @@ included. Packaging scripts are in BloodborneX/tools.
     foreach ($entry in @(@($package,"$ArtifactPrefix-$Version-win64.zip"), @($source,"$ArtifactPrefix-$Version-source.zip"))) {
         [IO.Compression.ZipFile]::CreateFromDirectory($entry[0],(Join-Path $release $entry[1]),[IO.Compression.CompressionLevel]::Optimal,$true)
     }
+    # Published 1.0.1/1.0.2 clients cannot discover the BloodborneX prefix. Same bytes, one compatibility asset.
+    if ($ArtifactPrefix -eq 'BloodborneX') { Copy-One (Join-Path $release "BloodborneX-$Version-win64.zip") (Join-Path $release "LanternEngine-$Version-win64.zip") }
     Get-ChildItem $release -File -Filter '*.zip' | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName).Hash,$_.Name } |
         Set-Content (Join-Path $release 'SHA256SUMS.txt') -Encoding ascii
     Write-Host "Release created: $release"

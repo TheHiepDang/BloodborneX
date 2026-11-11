@@ -1,100 +1,32 @@
-# BloodborneX native Neural Rendering — {{VERSION}}
+# BloodborneX {{VERSION}} — BloodbornePC package
 
-BloodborneX Windows x64 release, {{BUILD_DATE}}. Version `{{VERSION}}` is this fork's
-version. The launcher, package metadata, ZIP name and release tag agree on it.
-
-## Start here
+Windows x64 {{RELEASE_KIND}}, built {{BUILD_DATE}}.
 
 1. Extract the entire `{{ARTIFACT_PREFIX}}-{{VERSION}}-win64.zip` to a writable folder.
-   Keep it separate from older engine packages. Do not run inside the ZIP.
-2. Run **Lantern Engine.exe**, select your own decrypted Bloodborne 1.09 game
-   folder, and explicitly choose your existing saves folder if continuing a save.
-   This package contains no game files or saves. Back up saves before testing.
-3. To use NR, put your own `nvngx_dlssnr.dll` in the extracted package's `dlss`
-   folder, beside the included `nvngx.dll_dlssnr.dll` forwarder. The model is not
-   included, downloaded or modified by this package.
-4. Select DLSS, enable DLSS Neural Rendering, and start with one pass and 720p
-   NR input. NR ships **off**, frame generation **off**, and white point **0.125**.
-   Native AA/DLAA forces native input. NR is bypassed for FSR/TAA and invalid scenes.
-5. The in-game menu uses Insert or L3+R3. For Moonlight from a Mac, a controller's
-   L3+R3 avoids the missing Insert key. Each slider's circular arrow restores its
-   factory value. Customize extra passes enables independent pass 2/3 controls.
+2. Run **BloodbornePC.exe**, select your own decrypted Bloodborne 1.09 dump and existing saves location, then Play. The package contains no game files or saves.
+3. NR is optional and off by default. To use it, supply one model at **dlss/nvngx_dlssnr.dll**, choose DLSS SR/DLAA and enable **NR**. The model is never bundled or downloaded. Hashes identify builds for diagnostics; custom runtimes are always allowed. Actual exports, initialization, feature creation and evaluation determine availability. Failure disables NR while ordinary DLSS remains available.
+4. Open the in-game graphics menu with **Insert / L3+R3**. NR has its own tab; **Spec preset** is at the right. It contains two provided RTX 3070 profiles and a separate custom library with selective save/export/import. Applying a preset asks for confirmation and offers a restart.
 
-The NR runtime must match one of these exact x64 builds. The file version alone
-does not distinguish the original runtime from its FP16 compatibility derivative.
+## NR controls
 
-| Build | Bytes | SHA-256 | Validation |
-|---|---:|---|---|
-| openNR FP16 compatibility 310.9.16.0 | 276,162,560 | `CDFA6C1EC784867182164C7836F324F087B5C9F374D0C9FE46F54999FEABF3ED` | Existing RTX 3070 gameplay path |
-| Original 310.9.16.0, distributed as `nvngx_dlssnr_2026_10_16` | 266,424,944 | `2BC19BC09A7B89DD44F73E2AC0108FCC586E2154BDD0830F242F4F040E28789F` | Experimental: identity, exports and Vulkan initialization checked; inference/gameplay retest pending |
+One to three independently historied model passes run before DLSS SR/DLAA. Extra passes cost GPU time. Input height controls scene/SR size; **Performance** separately reduces model resolution to 0.75 scale. Native AA/DLAA retains output-size input. Automatic mask is on by default and white point is 0.125.
 
-The original October 16 runtime is recognized by the runtime-compatibility
-hotfix after RC1; the original RC1 executable rejects it. Check the engine update
-as well as the DLL. The launcher reports recognized versus gameplay-validated
-builds separately. Unknown hashes remain rejected. An accepted file still has to
-pass Vulkan initialization, feature creation, and evaluation before NR takes effect.
+**Composition: Log transfer** enables the native look, detail, colour, limits and stabilization adjustments. Legacy remains available. **Extra neural style** applies live after a brief settle interval: GPU work drains, all features release, coefficients change in memory, and features/history rebuild. Zero restores stock coefficients and the saved preset; nonzero uses Old/HT. The tensor layout is validated. The model file on disk is never changed. See the source repository's `docs/NR-RELEASE.md` for controls.
 
-[openNR](https://github.com/clshortfuse/openNR) documents the relationship between
-these hashes. Neither runtime is included or downloaded by BloodborneX.
+Custom preset files are versioned `.bbxpreset` text. Graphics options start selected; nongraphical options start excluded. Save/export uses a highlighted, read-only copy of the settings controls with a fixed header. Click rows/groups to include/exclude them. Imported settings are validated before any application; excluded settings retain their current values. Custom presets are stored under `user/presets` beside the active config and are not part of public archives.
 
-Choose the appropriate DLL yourself and install **one** file at:
+## Updates and compatibility
 
-```text
-dlss/nvngx_dlssnr.dll
-```
+BloodborneX is the project name; **BloodbornePC** is the distribution name. Published v1.0.1/v1.0.2 clients already recognize BloodbornePC archives. The full **Lantern Engine.exe** and legacy **Bloodborne Launcher.exe** forwarder remain inside the folder for old updater discovery, replacement/restart and shortcuts. Keep them. The new public entry is BloodbornePC.exe.
 
-For GeForce RTX 50-series, use the unmodified October 16 runtime. For other RTX
-cards, use the openNR FP16 compatibility runtime. There are no `original` or
-`compat` subfolders and no automatic switching between DLL files. The engine
-detects the actual Vulkan GPU name to select runtime compatibility handling;
-the launcher's status is a preview based on detected hardware. The original is
-refused on other GPU families. The older workstation Quadro RTX 5000 is not a
-GeForce RTX 50-series card. Replace the DLL only while the game is closed.
-Both builds use the same named Vulkan forwarder API; the supplied DLL is never
-modified, transformed, or patched.
+The updater uses **TheHiepDang/BloodborneX** and compatible full Windows packages with separately attached matching `package.json`, `update_family: bloodbornex-native-nr-v1` and `lantern-native-nr-` engine IDs. These identifiers and existing settings/storage paths remain stable. A source ZIP or a launcher-only file is not a complete update. Packaging locally does not itself publish a release.
 
-Missing/rejected models disable NR only. Ordinary DLSS should remain usable.
-Use this unofficial unsigned model only if you trust its provenance. No model
-download link or redistribution permission is implied.
+## Runtime and limits
 
-## Package and updates
+Python, .NET and DLSS SR dependencies are packaged. The current main-branch package does not bundle optional Streamline/DLSS-G or FSR 4/4.1.1 assets; those modes require their external runtimes. No separate SDK, Python or MSYS2 installation is needed to play. A suitable Vulkan GPU driver is required. DLSS frame generation remains experimental and requires compatible RTX 40/50 hardware, driver/HAGS support and restart; FSR 3.1 FG is also available. HDR/FG/NR coexistence and broad gameplay/long-session coverage remain limited. Ordinary DLSS/FSR fallback paths remain available.
 
-Python and .NET runtimes and native DLL dependencies are included; MSYS2, the .NET
-SDK and a separate Python installation are not required to play. A compatible
-Vulkan GPU driver is required. The tested hardware is an RTX 3070, not all RTX cards.
+No unofficial RTX 20/30 DLSS FG proxy is integrated. The NR-aware Python starter is intentional; do not add an old `bb-start.exe` whose render-size preparation differs. Build and synthetic tests do not certify visual effect or gameplay stability. Consult `VALIDATION.md` and `PACKAGE-CHECKS.json` beside the archives for exact checks.
 
-The launcher checks **TheHiepDang/BloodborneX**, not Awakenchan/LanternEngine.
-NR packages accept only full Windows packages whose attached `package.json`
-declares `update_family: bloodbornex-native-nr-v1` and an engine ID beginning
-`lantern-native-nr-`. Keep `LOCAL-NR-RELEASE` in place. Source ZIPs and launcher-only
-updates are not accepted as NR runtime packages. Nothing has been published by
-the local packaging operation. Until compatible releases exist, there is no update.
+See `docs/NR-{{VERSION}}.md` for release notes. `BUILD-PROVENANCE.json` and `FILES-SHA256.txt` record package inputs. The source ZIP contains a complete already-applied engine snapshot; do not reapply old cumulative patches.
 
-For publishing later, attach the `*-win64.zip`, `package.json` and `SHA256SUMS.txt`
-to a GitHub release tagged `v{{VERSION}}` ({{RELEASE_KIND}}). Attach the source
-ZIP as a separate source asset. Increment the embedded version for each future release. See `RELEASING.md` for the publication checklist.
-The release must attach its matching `package.json` separately; metadata inside the ZIP alone is insufficient for the updater.
-
-## Scope and limitations
-
-- One to three actual chained model evaluations, with independent temporal history.
-  More passes cost GPU time; photorealism or stronger changes are not guaranteed.
-- The current composition deliberately retains much of the original image. It is
-  not the complete modern OptiScaler/RenoDX composition pipeline.
-- The selected NR resolution is the scene/SR input resolution, not an independently
-  downscaled model-only input. White point, preset and automatic mask are shared.
-- Automatic mask should stay on. Style names are community labels, not NVIDIA names;
-  undocumented preset values can alias.
-- This candidate uses the NR-aware Python starter. Do not add `bb-start.exe` from
-  an older/native build: its render-size preparation does not yet have NR parity.
-- Ordinary DLSS SR and built-in FSR 3 are included. Optional Streamline/DLSS-G,
-  FSR 4/4.1.1 assets and bbbridge online helper are not bundled in this candidate.
-  Do not expect those optional modes to work simply because the launcher lists them.
-- FSR 3.1 is the supported frame-generation path for this candidate. Per-frame
-  descriptor and constant-buffer retention is fixed. A roughly five-minute NR+FG
-  gameplay retest showed bounded memory; this is not all-scene/long-session coverage.
-  No unofficial RTX 20/30 DLSS FG proxy is integrated.
-- Current validation is a local RC, not broad GPU/HDR/ultrawide certification.
-
-See `NR-{{VERSION}}.md` for current release notes, `NR-RC2.md` for the preceding candidate, and `NR-RC1.md` for earlier observations and `DLSSNR-HANDOFF.md` for development
-context. `BUILD-PROVENANCE.json` and `FILES-SHA256.txt` identify package inputs.
+Lantern Engine by Awaken (https://github.com/Awakenchan/LanternEngine). BloodborneX is a changed, unofficial fork. All bundled licenses/notices remain in `licenses/`.

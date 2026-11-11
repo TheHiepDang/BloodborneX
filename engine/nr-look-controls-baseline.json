@@ -1,0 +1,126 @@
+{
+  "description": "Supplement for the applied 1.0.2-compatible fg-hotfix NR source; not an engine checkout or release package.",
+  "baseline_source": "Applied 1.0.2-compatible fg-hotfix engine; exact per-file baseline hashes follow.",
+  "files": [
+    {
+      "path": "gpu/shim/bbport_custom_presets.h",
+      "baseline_sha256": null,
+      "modified_sha256": "a4f42151a3d550fa7240d90222fa88279eb8737d31ff5d507574a00ac9523d55"
+    },
+    {
+      "path": "gpu/shim/bbport_custom_presets.inc",
+      "baseline_sha256": null,
+      "modified_sha256": "57235e020a68afc44bf946751e3ff0e4bb23779bf2285bcfc065793096babd6a"
+    },
+    {
+      "path": "gpu/shim/bbport_custom_presets_ui.inc",
+      "baseline_sha256": null,
+      "modified_sha256": "183486a7c537a6c7eb7867f76ffbc72ab49e318c767f01375a452dce01a92666"
+    },
+    {
+      "path": "gpu/shim/bbport_preset_reference.inc",
+      "baseline_sha256": null,
+      "modified_sha256": "d2993cd503af7be01d3f2aa54c59db37cdf7e8eb251096d61143073ada76a5aa"
+    },
+    {
+      "path": "gpu/shim/bbport_preset_bindings.inc",
+      "baseline_sha256": null,
+      "modified_sha256": "089cb465e5a1d0044fa137a8d20746b09977ea4527cfc8d4afca448aff46138b"
+    },
+    {
+      "path": "tests/test_preset_ui.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "8d580dbaff0cb61f5d9b1de7261776cc5850d96b2fae19df88272ebf9ca54507"
+    },
+    {
+      "path": "gpu/shim/bbport_spec_preset.h",
+      "baseline_sha256": null,
+      "modified_sha256": "5db31ae9233f5be2df5e0ed5efc7d3895f0b0c2b245c2cd4899b7a5858828f10"
+    },
+    {
+      "path": "gpu/CMakeLists.txt",
+      "baseline_sha256": "83dece261e66f5b67ed367d340c82b67e6937bec06f0ac360ba60c12a1df8e8b",
+      "modified_sha256": "35b9fdd600c4645f30fe688b3fb79a7f342bbdb6786b7aac469741192bbb16f1"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.h",
+      "baseline_sha256": "851255609fe744f3bdf38cfbcd9b745a7de9fec151b9036b80b706955e00235a",
+      "modified_sha256": "b796020f22add6295a1a25099ce05115c6616d8d6e047ee615d72778b328b761"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.cpp",
+      "baseline_sha256": "3c8776f8d68011a218421d4091e8586330187f21443760ac5180cd88cc068bd0",
+      "modified_sha256": "c1ed384aacd9db208f4e5249ea880367a16b4b0f9c00321636abe45ee1fa2352"
+    },
+    {
+      "path": "gpu/shim/bbport_overlay.cpp",
+      "baseline_sha256": "927e56f078cc4f4a6113993b03c83a3df2037a4e4789755ff854f3f772bf41d0",
+      "modified_sha256": "931209066c1e1aded456a0515da48750f6b506becf6759aa7068065e855bc4f8"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp",
+      "baseline_sha256": "1c1320a06f693096c9c54a1885b4202a302e51451ab42286aef50067fdbe2594",
+      "modified_sha256": "6288e431ea9944f07af2790dfed82e2e6708a0cb24d36c6dacdc12b8d8d3f188"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/dlss_nr.comp",
+      "baseline_sha256": "9996261b2a768ecebcdfe17a2750fe87337c1ca3cd929978469c2bca19bb301c",
+      "modified_sha256": "e65b1cc238a271199f6465b0f66b2e5d81f18607b2c258c1cab3dbffa13faa05"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/dlss_nr_scaled.comp",
+      "baseline_sha256": "a2e8b319346e62acd45da167a9a8db2a260251dbef75dff59991741599a4f9e3",
+      "modified_sha256": "a6997f7f2a92d86206b3af44e943ec36b5683748cc0bf0ca9965bcb85229ef50"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/dlss_nr_look.comp",
+      "baseline_sha256": null,
+      "modified_sha256": "c94247c2e6605e446409e0614d7a3032ec140ca7b559edad23de2a0847d0522b"
+    },
+    {
+      "path": "tests/test_hdr_native.cpp",
+      "baseline_sha256": "5f2d4814c04cdeefcbd87ea13f6a8fe0739db2f28a8ae3ff824a2f8b0ecaef4c",
+      "modified_sha256": "8b483c2ff6f410bf81f67c09ccc78e3aa6805b47999b1d1393f9c02f7a5fa446"
+    },
+    {
+      "path": "tests/test_settings.cpp",
+      "baseline_sha256": "edf271d2cff0fdad381a3a485c6666f62a1805fec12d1a1afab94591f7f83fd1",
+      "modified_sha256": "9033e35d9fb37184d90692ebc5ac0a201f1aca9f1d17a887cdff56d9fb37d40a"
+    },
+    {
+      "path": "gpu/dlssnr_forwarder.cpp",
+      "baseline_sha256": "a2ec8e90f70120c55282056708d86da9e083578c54afc402f264d2d8a35313e2",
+      "modified_sha256": "cec3a35f3e2b40acff29c41670df9157c74f9f0d224a49297bb486f25117b377"
+    },
+    {
+      "path": "gpu/nr_extra_style.h",
+      "baseline_sha256": null,
+      "modified_sha256": "efcec1c14b0c443bbdcc47fb3c521e04d0ab96f771b35ce7da465a412cb3e170"
+    },
+    {
+      "path": "gpu/nr_extra_style_win.h",
+      "baseline_sha256": null,
+      "modified_sha256": "0b303ab6eab1e2e72024f217042fd089eede970144665d219913b09c17ec9597"
+    },
+    {
+      "path": "tests/test_nr_extra_style.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "4a58b39375f7fc517ebf2dd715508a6890eff92da0398fee945a7e04a7d45bf0"
+    },
+    {
+      "path": "tests/nr_style_fake_runtime.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "429f099276206fafcfe152a47d06412dfd07741e8466629da80d199c3f268db6"
+    },
+    {
+      "path": "tests/test_nr_style_forwarder.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "64dbe0424b3ba07dd945b5b8d84b9fd2ddfc10f58728cabd31fe4cdb1594bde8"
+    },
+    {
+      "path": "tests/run_nr_style_forwarder_test.py",
+      "baseline_sha256": null,
+      "modified_sha256": "4a0b5be4a54ca6a54768408fe53fcaaf348ab861f0cf5cd6c8dfc2d9afef3e33"
+    }
+  ]
+}

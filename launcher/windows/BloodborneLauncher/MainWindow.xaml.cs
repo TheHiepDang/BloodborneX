@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -100,8 +100,8 @@ namespace BloodborneLauncher
                     Dispatcher.BeginInvoke(() => Prompt.Confirm(L.T("Switch layout"), L.T("The launcher restarts to change its layout."), L.T("Restart now")),
                         System.Windows.Threading.DispatcherPriority.ApplicationIdle);
                 ws.Log(Paths.IsPortDir(Paths.PortDir)
-                        ? L.F($"Lantern Engine ready. Engine: {Paths.PortDir}")
-                        : L.T("Lantern Engine ready. Choose the engine folder in Settings."),
+                        ? L.F($"BloodborneX ready. Engine: {Paths.PortDir}")
+                        : L.T("BloodborneX ready. Choose the engine folder in Settings."),
                     Paths.IsPortDir(Paths.PortDir) ? LogLevel.Good : LogLevel.Warn);
                 // Once: the settings that suit this PC, shown before anything changes.
                 if (_directPlay)
@@ -449,7 +449,7 @@ namespace BloodborneLauncher
 
             var answer = System.Windows.MessageBox.Show(this,
                 L.T("The game is still running. Stop it and close the launcher?"),
-                "Lantern Engine", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+                "BloodborneX", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
             if (answer == MessageBoxResult.Cancel)
             {
                 e.Cancel = true;
@@ -817,7 +817,7 @@ namespace BloodborneLauncher
                         L.T("Windows or an antivirus would not let these through, so the old ones were kept:\n") +
                         string.Join("\n", skipped.Take(5)) +
                         L.T("\n\nThe game runs without them; online play may need ") +
-                        L.F($"them. Allow the Lantern Engine folder in the antivirus and update again, or take them from {Updater.ReleasesPage}"));
+                        L.F($"them. Allow the BloodborneX folder in the antivirus and update again, or take them from {Updater.ReleasesPage}"));
                 Application.Current.Shutdown();
             }
             catch (Exception ex)
@@ -876,7 +876,7 @@ namespace BloodborneLauncher
                 if (!Paths.IsPortDir(Paths.PortDir))
                 {
                     if (!Prompt.Confirm(L.T("Where is the engine?"),
-                            L.T("The launcher needs the Lantern Engine (the folder with run.py and bin\\bb-probe.exe). ") +
+                            L.T("The launcher needs the BloodborneX (the folder with run.py and bin\\bb-probe.exe). ") +
                             L.T("It is normally the folder the launcher came in."), L.T("Choose folder")))
                         return;
                     var dialog = new Microsoft.Win32.OpenFolderDialog { Title = L.T("Port folder (with Bloodborne.exe and run.py)") };

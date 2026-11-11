@@ -42,6 +42,16 @@ using var bloodbornePcDocument = JsonDocument.Parse("""
 """);
 var bloodbornePcRelease = (Updater.Release)parse.Invoke(null,new object[] { bloodbornePcDocument.RootElement })!;
 Check(bloodbornePcRelease.ZipUrl == "https://invalid/windows-pc", "Select BloodbornePC Windows runtime ZIP");
+// New primary archive must beat a legacy compatibility alias in either asset order.
+foreach (var reverse in new[] {false,true}) {
+    var assets=new[] {
+        new {name="LanternEngine-1.0.3-win64.zip",browser_download_url="https://invalid/legacy",size=456},
+        new {name="BloodborneX-1.0.3-win64.zip",browser_download_url="https://invalid/branded",size=456},
+        new {name="BloodborneX-1.0.3-source.zip",browser_download_url="https://invalid/source",size=123}};
+    using var branded=JsonDocument.Parse(JsonSerializer.Serialize(new {tag_name="v1.0.3",html_url="https://invalid/release",assets=reverse?assets.Reverse().ToArray():assets}));
+    var parsed=(Updater.Release)parse.Invoke(null,new object[]{branded.RootElement})!;
+    Check(parsed.ZipUrl=="https://invalid/branded", "Prefer BloodborneX runtime archive, independent of asset order");
+}
 using var stableDocument = JsonDocument.Parse("""
 {"tag_name":"v1.0.1","name":"v1.0.1","html_url":"https://github.com/TheHiepDang/BloodborneX/releases/tag/v1.0.1","assets":[
  {"name":"LanternEngine-1.0.1-source.zip","browser_download_url":"https://invalid/source","size":123},
@@ -67,6 +77,35 @@ try
 }
 finally { File.Delete(marker); }
 Console.WriteLine("PASS: fork, RC ordering, Windows asset selection, metadata and NR package guards");
+
+// Branded package preserves the executable and user-data contract of already published clients.
+Check(Updater.ExeName=="Lantern Engine.exe" && Updater.OldExeName=="Bloodborne Launcher.exe", "Legacy executable discovery stays compatible");
+var migrationRoot=Path.Combine(Path.GetTempPath(),"BloodbornePC-updater-"+Guid.NewGuid().ToString("N"));
+var incoming=Path.Combine(migrationRoot,"download","BloodbornePC");
+var installed=Path.Combine(migrationRoot,"installed");
+Directory.CreateDirectory(Path.Combine(incoming,"engine","out"));
+Directory.CreateDirectory(Path.Combine(installed,"user","presets"));
+try {
+    File.WriteAllText(Path.Combine(incoming,Updater.ExeName),"new full launcher");
+    File.WriteAllText(Path.Combine(incoming,Updater.OldExeName),"legacy forwarder");
+    File.WriteAllText(Path.Combine(incoming,"BloodbornePC.exe"),"new entry forwarder");
+    File.WriteAllText(Path.Combine(incoming,"engine","out","bb-probe.exe"),"new engine");
+    File.WriteAllText(Path.Combine(incoming,"lantern.ini"),"factory defaults");
+    var self=Path.Combine(installed,Updater.ExeName);
+    File.WriteAllText(self,"old full launcher");
+    File.WriteAllText(Path.Combine(installed,"lantern.ini"),"user settings");
+    File.WriteAllText(Path.Combine(installed,"user","presets","mine.bbxpreset"),"user preset");
+    var legacyFound=Directory.GetFiles(Path.Combine(migrationRoot,"download"),"Lantern Engine.exe",SearchOption.AllDirectories).Single();
+    Check(Path.GetDirectoryName(legacyFound)==incoming,"Published updater finds branded ZIP root through legacy executable");
+    var copy=typeof(Updater).GetMethod("CopyPackage",BindingFlags.NonPublic|BindingFlags.Static)!;
+    copy.Invoke(null,new object[]{incoming,installed,self,new List<string>()});
+    Check(File.ReadAllText(self)=="new full launcher","Old running launcher path replaced for restart");
+    Check(File.ReadAllText(Path.Combine(installed,"BloodbornePC.exe"))=="new entry forwarder","Branded entry installed");
+    Check(File.ReadAllText(Path.Combine(installed,"engine","out","bb-probe.exe"))=="new engine","Full engine replaced");
+    Check(File.ReadAllText(Path.Combine(installed,"lantern.ini"))=="user settings","Existing config preserved");
+    Check(File.ReadAllText(Path.Combine(installed,"user","presets","mine.bbxpreset"))=="user preset","Custom preset preserved");
+} finally {Directory.Delete(migrationRoot,true);}
+Console.WriteLine("PASS: BloodbornePC migration discovery, self-replacement, new entry and user-data preservation");
 
 namespace BloodborneLauncher.Core
 {

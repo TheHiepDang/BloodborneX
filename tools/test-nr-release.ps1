@@ -2,10 +2,11 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Release,
-    [ValidateSet('LanternEngine','BloodbornePC')][string]$ArtifactPrefix = 'LanternEngine'
+    [ValidateSet('BloodborneX','LanternEngine','BloodbornePC')][string]$ArtifactPrefix = 'BloodbornePC'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'release-file-policy.ps1')
 $releaseDir = (Resolve-Path $Release).Path
 $testDir = Join-Path ([IO.Path]::GetTempPath()) ("BloodborneX portable smoke " + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testDir | Out-Null
@@ -15,7 +16,7 @@ foreach ($line in Get-Content (Join-Path $releaseDir 'SHA256SUMS.txt')) {
     if ((Get-FileHash (Join-Path $releaseDir $Matches[2])).Hash -ne $Matches[1]) { throw "Archive checksum mismatch: $line" }
 }
 $checks.Add('Portable and source ZIP SHA-256 checksums match.')
-$archives = @(Get-ChildItem $releaseDir -File -Filter '*-win64.zip')
+$archives = @(Get-ChildItem $releaseDir -File -Filter "$ArtifactPrefix-*-win64.zip")
 if ($archives.Count -ne 1) { throw 'Expected exactly one Windows package ZIP' }
 Expand-Archive -LiteralPath $archives[0].FullName -DestinationPath $testDir
 $package = Join-Path $testDir $ArtifactPrefix
@@ -26,6 +27,7 @@ foreach ($line in $manifestLines) {
     if ((Get-FileHash -LiteralPath (Join-Path $package $relative)).Hash -ne $expected) { throw "File checksum mismatch: $relative" }
 }
 $files = @(Get-ChildItem $package -Recurse -File)
+if ($files | Where-Object { Test-PrivateReleasePath ([IO.Path]::GetRelativePath($package,$_.FullName)) }) { throw 'Private package input' }
 if ($files.Count -ne $manifestLines.Count + 1) { throw 'Unexpected extra package files' }
 if ($files | Where-Object { $_.Name -match '^(nvngx_dlssnr\.dll|eboot\..*|boot.*\.bin|prepared\.json|game_dir\.txt|bb-start\.exe)$' }) { throw 'Forbidden package input' }
 $checks.Add("All $($manifestLines.Count) packaged-file hashes match; no NR model, native starter or game-derived inputs.")
@@ -61,6 +63,6 @@ $report += $checks | ForEach-Object { "- PASS: $_" }
 $report += @('', 'A fresh temporary extraction with spaces was used. Startup ran without system Python/MSYS2 PATH.',
     'These checks do not launch gameplay or certify rendering/NR visual quality. Vulkan validation-layer coverage is not claimed.',
     'No game, saves or proprietary NR model is included. No GitHub publication or push was performed.', '',
-    "Temporary smoke extraction retained at: $testDir")
+    "Temporary smoke extraction retained locally.")
 $report | Set-Content (Join-Path $releaseDir 'VALIDATION.md') -Encoding utf8
 $report

@@ -24,7 +24,8 @@ namespace BloodborneLauncher.Core
             gpu.Contains("GeForce RTX 50", StringComparison.OrdinalIgnoreCase);
         public static string RuntimePath(string root) => Path.Combine(root, "nvngx_dlssnr.dll");
         // The engine uses its actual Vulkan adapter for runtime compatibility checks.
-        public static string DirectoryName => new[]
+        public static string DirectoryName => Environment.GetEnvironmentVariable("BB_DLSS_DIR") is { Length: > 0 } external
+            ? external : new[]
         {
             Path.Combine(Paths.DataDir, "dlss"), Path.Combine(Paths.EngineDir, "dlss"),
         }.FirstOrDefault(root => File.Exists(RuntimePath(root))) ?? Path.Combine(Paths.DataDir, "dlss");
@@ -42,17 +43,9 @@ namespace BloodborneLauncher.Core
                     return _cachedStatus;
                 using var stream = File.OpenRead(path);
                 var hash = Convert.ToHexString(SHA256.HashData(stream));
-                var build = Identify(info.Length, hash);
                 _cachedPath = path;
                 _cachedWrite = info.LastWriteTimeUtc;
-                return _cachedStatus = build switch
-                {
-                    RuntimeBuild.OpenNrFp16 => L.T("Validated: openNR FP16 compatibility runtime 310.9.16.0"),
-                    RuntimeBuild.OriginalRenoDx when PrefersOriginal(Hardware.Detect().Vendor, Hardware.Detect().Gpu)
-                        => L.T("Recognized: unmodified October 16 runtime 310.9.16.0 for RTX 50-series; experimental Vulkan support, checked at game startup"),
-                    RuntimeBuild.OriginalRenoDx => L.T("NR unavailable: the unmodified runtime needs GeForce RTX 50-series. Install the FP16 compatibility runtime as dlss/nvngx_dlssnr.dll."),
-                    _ => L.F($"NR unavailable: unrecognized runtime ({info.Length} bytes, SHA-256 {hash}). Use one of the documented exact runtime builds.")
-                };
+                return _cachedStatus = L.F($"User-supplied NR runtime: {info.Length} bytes. Custom hashes are always allowed; the renderer checks exports and initialization. SHA-256 {hash}");
             }
             catch (Exception error) { return L.F($"Cannot validate runtime: {error.Message}"); }
         }

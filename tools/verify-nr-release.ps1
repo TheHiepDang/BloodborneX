@@ -4,16 +4,18 @@ param(
     [Parameter(Mandatory)][string]$Release,
     [Parameter(Mandatory)][string]$Version,
     [Parameter(Mandatory)][string]$ExpectedEngineHash,
-    [ValidateSet('LanternEngine','BloodbornePC')][string]$ArtifactPrefix = 'LanternEngine'
+    [ValidateSet('BloodborneX','LanternEngine','BloodbornePC')][string]$ArtifactPrefix = 'BloodbornePC'
 )
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'release-file-policy.ps1')
 $root=(Resolve-Path -LiteralPath $Release).Path
 $package=Join-Path $root $ArtifactPrefix
 $checks=[Collections.Generic.List[string]]::new()
 function Check([bool]$Condition,[string]$Name) { if (!$Condition) { throw "Release check failed: $Name" };$checks.Add($Name);Write-Host "PASS: $Name" }
 $metadata=Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw | ConvertFrom-Json
 Check ($metadata.version -eq $Version -and $metadata.engine -eq "lantern-native-nr-$Version" -and $metadata.update_family -eq 'bloodbornex-native-nr-v1' -and $metadata.repository -eq 'TheHiepDang/BloodborneX') 'Release/update metadata matches the requested version'
+if ($ArtifactPrefix -eq 'BloodbornePC') { Check (Test-Path (Join-Path $package 'BloodbornePC.exe')) 'BloodbornePC public entry exists' }
 $exe=Join-Path $package 'Lantern Engine.exe'
 $info=[Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
 Check (($info.ProductVersion -split '\+')[0] -eq $Version -and ([version]$info.FileVersion).ToString(3) -eq ($Version -split '-')[0]) 'Compiled launcher version matches metadata and release tag'
@@ -22,7 +24,12 @@ Check ((Get-Content -LiteralPath (Join-Path $package 'LOCAL-NR-RELEASE') -First 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $expectedArchives=@("$ArtifactPrefix-$Version-win64.zip","$ArtifactPrefix-$Version-source.zip")
 $checksumLines=@(Get-Content -LiteralPath (Join-Path $root 'SHA256SUMS.txt'))
-Check ($checksumLines.Count -eq 2) 'Exactly two archive checksums'
+if ($ArtifactPrefix -eq 'BloodborneX') {
+    $expectedArchives += "LanternEngine-$Version-win64.zip"
+    Check ((Get-FileHash (Join-Path $root "BloodborneX-$Version-win64.zip")).Hash -eq (Get-FileHash (Join-Path $root "LanternEngine-$Version-win64.zip")).Hash) 'Legacy updater ZIP is byte-identical to the BloodborneX package'
+    Check (Test-Path (Join-Path $package 'BloodborneX.exe')) 'BloodborneX launcher entry exists'
+}
+Check ($checksumLines.Count -eq $expectedArchives.Count) 'Checksums cover every required archive'
 foreach ($line in $checksumLines) {
     Check ($line -match '^([A-Fa-f0-9]{64})  ([^/\\]+)$') 'Safe archive checksum entry'
     $expected=$Matches[1];$name=$Matches[2]
@@ -35,6 +42,7 @@ foreach ($name in $expectedArchives) {
         $files=@($zip.Entries | Where-Object { !$_.FullName.EndsWith('/') })
         $names=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         foreach ($entry in $files) {
+            if (Test-PrivateReleasePath $entry.FullName) { throw "Private archive input: $($entry.FullName)" }
             if (!$names.Add($entry.FullName)) { throw "Duplicate ZIP path: $($entry.FullName)" }
             if ($entry.FullName -match '(^|/)(nvngx_dlssnr\.dll|eboot\.[^/]*|boot[^/]*\.bin|prepared\.json|game_dir\.txt|\.git|\.release-settings\.json|\.release-work)(/|$)|\.(pdb|dmp|log|bak|old|orig)$') { throw "Forbidden archive input: $($entry.FullName)" }
         }

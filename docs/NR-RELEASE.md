@@ -1,100 +1,135 @@
-# BloodborneX native Neural Rendering — 1.0.1
+# BloodborneX v1.0.3
 
-BloodborneX Windows x64 release, 25 October 2026. Version `1.0.1` is this fork's
-version. The launcher, package metadata, ZIP name and release tag agree on it.
+## Highlights
 
-## Start here
+- **BloodbornePC distribution:** download `BloodbornePC-1.0.3-win64.zip`, extract the BloodbornePC folder and launch `BloodbornePC.exe`. The project remains BloodborneX, a changed/unofficial fork of Lantern Engine by Awaken (https://github.com/Awakenchan/LanternEngine).
+- **Updater compatibility:** published v1.0.1/v1.0.2 clients already recognize the BloodbornePC archive name. Existing internal launcher names, user settings/storage and update-family IDs are retained so discovery, installation and restart remain compatible. This is not a BloodborneX-only ZIP transition.
+- **Dedicated NR page:** native and launcher controls for model input, intensity, per-pass tuning and expanded tone/detail/colour/stability adjustments.
+- **Live Extra neural style:** changes apply after the slider settles, with a brief feature/history rebuild rather than a game restart. Zero restores stock coefficients; nonzero selects Old/HT. The model file on disk is unchanged, and incompatible tensor layouts are rejected safely.
+- **Custom NR runtimes always allowed:** file hashes are diagnostic only. The user supplies one model at `dlss/nvngx_dlssnr.dll`; actual exports, initialization and evaluation determine availability. A missing/failing model falls back to ordinary DLSS.
+- **Spec preset:** a right-aligned in-game tab with RTX 3070 SLOP and RTX 3070 - SLOP - Cinematic, plus multiple custom presets. Selectively save/export/import settings and delete saved user presets with confirmation. A read-only reference view has a fixed header, group selection and visible exclusion indicators. Applying a preset offers the existing restart action.
 
-1. Extract the entire `LanternEngine-1.0.1-win64.zip` to a writable folder.
-   Keep it separate from older engine packages. Do not run inside the ZIP.
-2. Run **Lantern Engine.exe**, select your own decrypted Bloodborne 1.09 game
-   folder, and explicitly choose your existing saves folder if continuing a save.
-   This package contains no game files or saves. Back up saves before testing.
-3. To use NR, put your own `nvngx_dlssnr.dll` in the extracted package's `dlss`
-   folder, beside the included `nvngx.dll_dlssnr.dll` forwarder. The model is not
-   included, downloaded or modified by this package.
-4. Select DLSS, enable DLSS Neural Rendering, and start with one pass and 720p
-   NR input. NR ships **off**, frame generation **off**, and white point **0.125**.
-   Native AA/DLAA forces native input. NR is bypassed for FSR/TAA and invalid scenes.
-5. The in-game menu uses Insert or L3+R3. For Moonlight from a Mac, a controller's
-   L3+R3 avoids the missing Insert key. Each slider's circular arrow restores its
-   factory value. Customize extra passes enables independent pass 2/3 controls.
+## Install and update
 
-The NR runtime must match one of these exact x64 builds. The file version alone
-does not distinguish the original runtime from its FP16 compatibility derivative.
+Download the complete **BloodbornePC-1.0.3-win64.zip**, not the source ZIP. Extract to a writable folder, run **BloodbornePC.exe**, select your own decrypted Bloodborne 1.09 dump and existing saves location, then Play. NR is optional and off by default. Supply your own NR model to enable it.
 
-| Build | Bytes | SHA-256 | Validation |
-|---|---:|---|---|
-| openNR FP16 compatibility 310.9.16.0 | 276,162,560 | `CDFA6C1EC784867182164C7836F324F087B5C9F374D0C9FE46F54999FEABF3ED` | Existing RTX 3070 gameplay path |
-| Original 310.9.16.0, distributed as `nvngx_dlssnr_2026_10_16` | 266,424,944 | `2BC19BC09A7B89DD44F73E2AC0108FCC586E2154BDD0830F242F4F040E28789F` | Experimental: identity, exports and Vulkan initialization checked; inference/gameplay retest pending |
+Existing installations can use the built-in updater. The retained `Lantern Engine.exe` and `Bloodborne Launcher.exe` are compatibility implementation details; do not delete them. Presets, settings, saves, mods and logs remain user data. The complete applied source is in **BloodbornePC-1.0.3-source.zip**. All third-party licenses and credits are retained. No game files, saves or proprietary NR model are distributed.
 
-The original October 16 runtime is recognized by the runtime-compatibility
-hotfix after RC1; the original RC1 executable rejects it. Check the engine update
-as well as the DLL. The launcher reports recognized versus gameplay-validated
-builds separately. Unknown hashes remain rejected. An accepted file still has to
-pass Vulkan initialization, feature creation, and evaluation before NR takes effect.
+## Validation and limits
 
-[openNR](https://github.com/clshortfuse/openNR) documents the relationship between
-these hashes. Neither runtime is included or downloaded by BloodborneX.
+Native settings/preset tests, headless UI selection tests, NR style resource/lifecycle fixtures, both launcher builds and updater fixtures were exercised during development. Stable packaging additionally checks archive hashes/manifests, matching versions/metadata, executable discovery, bundled Python/native startup and Vulkan capability probing in a fresh extraction with spaces.
 
-Choose the appropriate DLL yourself and install **one** file at:
+These checks do not certify full gameplay quality, HDR, frame-generation coexistence, original RTX 50 inference, file-browser/controller interaction or long-session stability. NR, HDR and frame generation remain experimental. See `VALIDATION.md`, `PACKAGE-CHECKS.json` and the source docs for the exact checks performed.
 
-```text
-dlss/nvngx_dlssnr.dll
+
+# Native NR controls
+
+Included in BloodborneX v1.0.3. NR remains experimental; synthetic checks do not establish gameplay quality or stability.
+
+The launchers and Insert/L3+R3 overlay now have a separate **NR** page. Existing
+INI keys and independent pass 2/3 settings are retained. In both launcher layouts,
+NR is separate from Graphics. The overlay's search and controller tab navigation
+include the new tab.
+
+## Using the new controls
+
+Choose DLSS SR/DLAA, enable NR and provide the supported user-supplied runtime as
+before. Select **Composition: Log transfer** on the NR page to enable the new
+controls. **Legacy** remains the default for old and new profiles. It retains the
+previous 75% luminance / 25% per-channel resolve and does not allocate edit-history
+images. Log transfer leaves the existing model input, inference count and pre-SR
+insertion point intact. It works at full and reduced model resolutions.
+
+**Model intensity** remains 0–2. **Edit strength**, independently adjustable from
+0–4, scales the model's log edits after inference. This can amplify an existing
+edit substantially, without additional inference passes. It cannot create a new
+neural detail or style when the model generated no change. Limits apply after
+amplification; increase the relevant limit as well if it is constraining the edit.
+
+Suggested first A/B: one model pass, unchanged style/intensity/input height,
+Legacy versus Log transfer at edit strength 1, then 1.5–2. Keep stabilization off
+until the visual effect is established. These are test starting points, not
+gameplay-validated presets.
+
+| Control | Range/default | Meaning |
+| --- | --- | --- |
+| Adjust NR's look | On | Off uses bounded neutral log transfer and bypasses look/stabilization settings |
+| Edit strength | 0–4 / 1 | Scales neural edits; zero produces no edit |
+| Brightening, Darkening | 0–4 / 1 | Independently scale positive/negative luminance edits |
+| Colour change | 0–4 / 1 | Scales relative colour edits |
+| Hue shift | 0–2 / 1 | Scales the component of the colour edit perpendicular to the source colour direction; does not rotate the whole frame |
+| Shadows, Midtones, Highlights | 0–4 / 1 | Smooth source-luminance weights on neural edits |
+| Max brightening, Max darkening | 0–8 stops / 2 | Final log-luminance bounds; **zero prevents that direction of luminance change** |
+| Max colour change | 0–8 stops / 2 | Final per-channel chroma-edit bound; zero removes chroma edits |
+| Near-black protection | 0–0.1 / 0.001 | Fade edits to zero near black; zero disables this gate |
+| Large-scale tone, Fine detail | 0–3 / 1 | Separately scale a guided broad edit and its residual |
+| Detail radius | 0.1–5% / 1.5% | Sparse nine-tap filter radius relative to the smaller model dimension |
+| Halo suppression | 0–1 / 0 | Constrain amplified edits to neighbourhood edit extrema on the same depth surface |
+| Halo next to dark objects | 0–1 / 0 | Reduce the fine edit beside darker source neighbours |
+| Detail stability | Auto / Off / Always | Source-edge constraint on amplified detail; Auto acts when detail gain exceeds 1. This is not an inferred copy of the add-on's algorithm |
+| Stabilize | Off / Static / Motion; default Off | Static accepts motion below 0.25 model pixels; Motion reprojects previous edits |
+| Stabilize time | 0–500 ms / 60 | Exponential history decay using elapsed real-frame time; zero uses the current answer |
+| Stabilize detail | On | Off retains the current fine residual while smoothing the remaining edit |
+
+Limits are separate luminance/chroma constraints: a pixel channel's total gain can
+exceed the luminance limit when a chroma edit is also present. Final log edits are
+bounded to ±16 and composed RGB is bounded to finite RGBA16F magnitude. Alpha is
+copied unchanged.
+
+These controls are independently written equivalents. They do not claim identical
+RenoDX behavior or defaults. The **Extra neural style** prototype edits loaded model coefficients, with zero
+as a bypass. It applies live after a GPU drain and feature rebuild without restarting the game. The model file on disk is unchanged; no model binary or weights are bundled or downloaded. After-SR insertion and new HDR proxy/exposure
+strategies are not part of this change. The live caller still supplies `hdr=false`;
+synthetic HDR shader tests do not establish live HDR proxy use.
+
+## Rendering and resource handling
+
+Log transfer runs one compute edit stage after the final model pass. It separates
+log luminance and relative colour, applies optional spatial/tonal adjustments, then
+optionally reprojects edit history. Original scene colour is never blurred.
+Composition applies the edit to the untouched scene before ordinary SR/DLAA and UI.
+The reduced-size resolve retains depth-guided reconstruction and interpolates log
+edits on that path. The raw model outputs remain available for plane capture and
+the full-size four-band diagnostic.
+
+Motion uses the engine's previous-minus-current convention in model pixels. Edit
+history rejects offscreen/nonfinite motion, depth changes and incompatible settings.
+It resets on engine history resets, resource size/model changes, return from Legacy
+and frame gaps above 250 ms. Historical edits are neighbourhood-constrained. These
+are heuristic rejection rules; they need moving-character, camera-cut, particles,
+occlusion and dark-scene gameplay tests.
+
+The new images allocate lazily on first Log transfer use: one RGBA16F edit image
+and two RGBA32F history images, approximately **40 bytes per model pixel** (about
+35.2 MiB at 1280×720). They are retained after returning to Legacy until model
+resources are rebuilt. Spatial/temporal GPU overhead is not yet benchmarked at
+gameplay resolutions. Overall NR timing includes this stage in the resolve segment.
+
+## Source integration
+
+Launcher changes live directly in this repository. Native changes require a
+complete applied engine checkout. The durable native changes are:
+
+- `engine/nr-look-controls.patch`: supplemental source patch, including GPU and settings regressions.
+- `engine/nr-look-controls-baseline.json`: exact baseline and modified hashes for each affected file.
+
+Apply the supplement to the compatible **applied** source, after matching its
+baseline hashes. It is not a patch for the patch-only `engine/` directory. Do not
+apply it to an installed game or an unrelated engine revision. For a matching
+checkout:
+
+```powershell
+git -C 'C:\path\to\applied-engine' apply --check 'C:\path\to\BloodborneX\engine\nr-look-controls.patch'
+git -C 'C:\path\to\applied-engine' apply 'C:\path\to\BloodborneX\engine\nr-look-controls.patch'
 ```
 
-For GeForce RTX 50-series, use the unmodified October 16 runtime. For other RTX
-cards, use the openNR FP16 compatibility runtime. There are no `original` or
-`compat` subfolders and no automatic switching between DLL files. The engine
-detects the actual Vulkan GPU name to select runtime compatibility handling;
-the launcher's status is a preview based on detected hardware. The original is
-refused on other GPU families. The older workstation Quadro RTX 5000 is not a
-GeForce RTX 50-series card. Replace the DLL only while the game is closed.
-Both builds use the same named Vulkan forwarder API; the supplied DLL is never
-modified, transformed, or patched.
+Build and package the launcher and this modified engine together before game
+testing. An older engine ignores the new settings. The v1.0.3 source archive
+contains the complete applied engine; do not reapply the supplement to it.
 
-Missing/rejected models disable NR only. Ordinary DLSS should remain usable.
-Use this unofficial unsigned model only if you trust its provenance. No model
-download link or redistribution permission is implied.
 
-## Package and updates
+## Presets and validation
 
-Python and .NET runtimes and native DLL dependencies are included; MSYS2, the .NET
-SDK and a separate Python installation are not required to play. A compatible
-Vulkan GPU driver is required. The tested hardware is an RTX 3070, not all RTX cards.
+The right-aligned Spec preset tab includes two provided RTX 3070 profiles and a separate custom library. Save or export selected settings through the read-only reference view; graphics default included. Import validates the complete preset before application. Apply, overwrite and deletion require confirmation.
 
-The launcher checks **TheHiepDang/BloodborneX**, not Awakenchan/LanternEngine.
-NR packages accept only full Windows packages whose attached `package.json`
-declares `update_family: bloodbornex-native-nr-v1` and an engine ID beginning
-`lantern-native-nr-`. Keep `LOCAL-NR-RELEASE` in place. Source ZIPs and launcher-only
-updates are not accepted as NR runtime packages. Nothing has been published by
-the local packaging operation. Until compatible releases exist, there is no update.
-
-For publishing later, attach the `*-win64.zip`, `package.json` and `SHA256SUMS.txt`
-to a GitHub release tagged `v1.0.1` (stable release). Attach the source
-ZIP as a separate source asset. Increment the embedded version for each future release. See `RELEASING.md` for the publication checklist.
-The release must attach its matching `package.json` separately; metadata inside the ZIP alone is insufficient for the updater.
-
-## Scope and limitations
-
-- One to three actual chained model evaluations, with independent temporal history.
-  More passes cost GPU time; photorealism or stronger changes are not guaranteed.
-- The current composition deliberately retains much of the original image. It is
-  not the complete modern OptiScaler/RenoDX composition pipeline.
-- The selected NR resolution is the scene/SR input resolution, not an independently
-  downscaled model-only input. White point, preset and automatic mask are shared.
-- Automatic mask should stay on. Style names are community labels, not NVIDIA names;
-  undocumented preset values can alias.
-- This candidate uses the NR-aware Python starter. Do not add `bb-start.exe` from
-  an older/native build: its render-size preparation does not yet have NR parity.
-- Ordinary DLSS SR and built-in FSR 3 are included. Optional Streamline/DLSS-G,
-  FSR 4/4.1.1 assets and bbbridge online helper are not bundled in this candidate.
-  Do not expect those optional modes to work simply because the launcher lists them.
-- FSR 3.1 is the supported frame-generation path for this candidate. Per-frame
-  descriptor and constant-buffer retention is fixed. A roughly five-minute NR+FG
-  gameplay retest showed bounded memory; this is not all-scene/long-session coverage.
-  No unofficial RTX 20/30 DLSS FG proxy is integrated.
-- Current validation is a local RC, not broad GPU/HDR/ultrawide certification.
-
-See `NR-1.0.1.md` for current release notes, `NR-RC2.md` for the preceding candidate, and `NR-RC1.md` for earlier observations and `DLSSNR-HANDOFF.md` for development
-context. `BUILD-PROVENANCE.json` and `FILES-SHA256.txt` identify package inputs.
+Native settings, headless preset UI, style fixtures and GPU shader checks were exercised during development. Release archive and portable startup checks do not certify gameplay, HDR, controller interaction or long-session stability. See the versioned release notes and packaged validation reports.

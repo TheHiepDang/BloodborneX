@@ -74,7 +74,7 @@ namespace BloodborneLauncher
 
         public MainWindow()
         {
-            Title = "Lantern Engine";
+            Title = "BloodborneX";
             Width = 1040;
             Height = 780;
             MinWidth = 820;
@@ -178,8 +178,8 @@ namespace BloodborneLauncher
             if (args.Contains("--test-trophy"))
                 TrophyToast.Announce(TrophyTracker.ById[14]);
             ws.Log(Paths.IsPortDir(Paths.PortDir)
-                    ? L.F($"Lantern Engine ready. Engine: {Paths.PortDir}")
-                    : L.T("Lantern Engine ready. Choose the engine folder in Settings."),
+                    ? L.F($"BloodborneX ready. Engine: {Paths.PortDir}")
+                    : L.T("BloodborneX ready. Choose the engine folder in Settings."),
                 Paths.IsPortDir(Paths.PortDir) ? LogLevel.Good : LogLevel.Warn);
             Dispatcher.UIThread.Post(() =>
             {
@@ -445,7 +445,7 @@ namespace BloodborneLauncher
             grid.Children.Add(_searchArea);
 
             var title = new TextBlock { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, IsHitTestVisible = false };
-            var name = new Run("Lantern Engine") { FontWeight = FontWeight.SemiBold };
+            var name = new Run("BloodborneX") { FontWeight = FontWeight.SemiBold };
             name.Bind(TextElement.ForegroundProperty, this.GetResourceObservable("TextFillColorPrimaryBrush"));
             _titlePage.Bind(TextElement.ForegroundProperty, this.GetResourceObservable("TextFillColorTertiaryBrush"));
             title.Inlines = new InlineCollection { name, _titlePage };
@@ -501,6 +501,7 @@ namespace BloodborneLauncher
             _playItem = Tab(L.T("Play"), typeof(PlayPage));
             Tab(L.T("Display"), typeof(DisplayPage));
             Tab(L.T("Graphics"), typeof(GraphicsPage));
+            Tab(L.T("NR"), typeof(NeuralRenderingPage));
             _controlsItem = Tab(L.T("Controls"), typeof(ControlsPage));
             Tab(L.T("Trophies"), typeof(TrophiesPage));
             _onlineItem = Tab(L.T("Online"), typeof(OnlinePage));
@@ -546,6 +547,7 @@ namespace BloodborneLauncher
             _classicPlay = Item(SymbolRegular.Play24, L.T("Play"), typeof(PlayPage));
             Item(SymbolRegular.Desktop24, L.T("Display"), typeof(DisplayPage));
             Item(SymbolRegular.Sparkle24, L.T("Graphics"), typeof(GraphicsPage));
+            Item(SymbolRegular.BrainCircuit24, L.T("Neural Rendering"), typeof(NeuralRenderingPage));
             _classicControls = Item(SymbolRegular.XboxController24, L.T("Controls"), typeof(ControlsPage));
             Item(SymbolRegular.Trophy24, L.T("Trophies"), typeof(TrophiesPage));
             _classicMods = Item(SymbolRegular.PuzzlePiece24, L.T("Mods & patches"), typeof(ModsPage));
@@ -872,7 +874,7 @@ namespace BloodborneLauncher
             Dispatcher.UIThread.Post(async () =>
             {
                 if (!IsVisible) ShowLauncher();
-                var answer = Prompt.Choose("Lantern Engine", L.T("The game is still running. Stop it and close the launcher?"),
+                var answer = Prompt.Choose("BloodborneX", L.T("The game is still running. Stop it and close the launcher?"),
                     L.T("Cancel"), L.T("Keep it running"), L.T("Stop and close"));
                 if (answer <= 0) return;
                 _closing = true;
@@ -1217,7 +1219,7 @@ namespace BloodborneLauncher
                         L.T("Windows or an antivirus would not let these through, so the old ones were kept:\n") +
                         string.Join("\n", skipped.Take(5)) +
                         L.T("\n\nThe game runs without them; online play may need ") +
-                        L.F($"them. Allow the Lantern Engine folder in the antivirus and update again, or take them from {Updater.ReleasesPage}"));
+                        L.F($"them. Allow the BloodborneX folder in the antivirus and update again, or take them from {Updater.ReleasesPage}"));
                 LanternApp.Quit();
             }
             catch (Exception ex)
@@ -1278,7 +1280,7 @@ namespace BloodborneLauncher
                 if (!Paths.IsPortDir(Paths.PortDir))
                 {
                     if (!Prompt.Confirm(L.T("Where is the engine?"),
-                            L.T("The launcher needs the Lantern Engine (the folder with run.py and bin\\bb-probe.exe). ") +
+                            L.T("The launcher needs the BloodborneX (the folder with run.py and bin\\bb-probe.exe). ") +
                             L.T("It is normally the folder the launcher came in."), L.T("Choose folder")))
                         return;
                     var folder = Ui.PickFolder(L.T("Port folder (with Bloodborne.exe and run.py)"));
