@@ -38,3 +38,5 @@ launcher/windows/install.txt
 .env.*
 *.bbxpreset
 docs/*
+!docs/tier1-graphics/
+!docs/tier1-graphics/**

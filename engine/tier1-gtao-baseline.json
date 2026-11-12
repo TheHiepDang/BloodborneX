@@ -1,0 +1,57 @@
+{
+  "description": "Regular GTAO supplement for the complete applied v1.0.3 NR engine; apply after NR controls.",
+  "bloodbornex_commit": "5710aeb4626cc5f86ba0730b9afc3e1de5c4442d",
+  "upstream_commit": "573f83fd366d70bf26ce788edb9775a1b863676a",
+  "files": [
+    {
+      "path": "gpu/CMakeLists.txt",
+      "baseline_sha256": "35b9fdd600c4645f30fe688b3fb79a7f342bbdb6786b7aac469741192bbb16f1",
+      "modified_sha256": "481b071847580d3b52664c0f7ff99c6e868bd4e90e16afa60c55ae871fb87ef2"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/gtao.frag",
+      "baseline_sha256": null,
+      "modified_sha256": "e3d9c9e4444c7b7a31d9613bab97e241efae2f33dba7502298711cdab940c645"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_gtao.h",
+      "baseline_sha256": null,
+      "modified_sha256": "8eddae5360fe4ef3469ca6e61cb6aed063fb0a0beda80cb446710ca5eba21c4e"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_cache.cpp",
+      "baseline_sha256": "0f9f853f13866cd40c8fb8f949af69c46c6aaa4240337f49f4781076b61aa3fa",
+      "modified_sha256": "0681273bd720968a67f156303e929a79ac7d8439baecf7c98b8ce780e6766e6e"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_serialization.cpp",
+      "baseline_sha256": "9eba1b007d018f3b9c03cad427f29fddca9538098c9396e851e9d36bc811a362",
+      "modified_sha256": "c766e0c05243c63f99dd10df7b34366bdc6ef00a5e75fa1831b19118be185417"
+    },
+    {
+      "path": "gpu/shim/bbport_overlay.cpp",
+      "baseline_sha256": "931209066c1e1aded456a0515da48750f6b506becf6759aa7068065e855bc4f8",
+      "modified_sha256": "de7388d4c26347a8d44bddde4729f35ba48ac1b565afb0f402dae5b700788b8b"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.cpp",
+      "baseline_sha256": "c1ed384aacd9db208f4e5249ea880367a16b4b0f9c00321636abe45ee1fa2352",
+      "modified_sha256": "5fbee64ef796aeedd1de9d278a2017e34af0e9f14c0e2c321f02acfe2921beed"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.h",
+      "baseline_sha256": "b796020f22add6295a1a25099ce05115c6616d8d6e047ee615d72778b328b761",
+      "modified_sha256": "b1cf67bb0a119d31852ea7e57a8faa9b0329d67a63545f794e01496147785dbb"
+    },
+    {
+      "path": "tests/test_gtao.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "82a197b1ba04fc1b3d16ed31d7912f08df21e376284edcf6eea459ec8cffebba"
+    },
+    {
+      "path": "tests/test_settings.cpp",
+      "baseline_sha256": "9033e35d9fb37184d90692ebc5ac0a201f1aca9f1d17a887cdff56d9fb37d40a",
+      "modified_sha256": "534635ce1167f4472780629c667a7ba2f1b4f8cfcae0ba4607c0f7d99fb036bb"
+    }
+  ]
+}

@@ -88,6 +88,44 @@ namespace BloodborneLauncher.Views
             Add(Card(SymbolRegular.DeveloperBoard24, "DLSS", "", null, out _dlssHint));
 
             // The engine's picture and camera controls (bbport_settings.cpp clamps the same ranges).
+            Group(L.T("Ambient occlusion"));
+            ToggleRow(SymbolRegular.DarkTheme24, L.T("GTAO (restart required)"),
+                L.T("Replaces the game's SSAO. Keep Ambient occlusion (SSAO) enabled. Uses the existing AO strength with Picture tuning on. Unsupported shader layouts retain SSAO."),
+                () => Ini.Get("graphics_gtao", "0") == "1", v => Ini.Set("graphics_gtao", v ? "1" : "0"));
+
+            IniCombo(SymbolRegular.DarkTheme24, L.T("GTAO quality (restart required)"),
+                L.T("Requires GTAO. HQ adds spatial denoising and full internal-resolution AO."),
+                new[] { new Choice(L.T("Regular GTAO"), "0"), new Choice(L.T("High-quality GTAO"), "1") }, "graphics_ao_quality");
+            Group(L.T("Screen-space lighting"));
+            ToggleRow(SymbolRegular.Lightbulb24, L.T("SSGI (live in game)"), L.T("Screen-space indirect lighting. Experimental; adds GPU cost. Toggle live in the in-game overlay; launcher changes apply on the next launch."),
+                () => Ini.Get("graphics_ssgi", "0") == "1", v => Ini.Set("graphics_ssgi", v ? "1" : "0"));
+            IniSlider(SymbolRegular.Lightbulb24, L.T("Indirect lighting strength"), 0, 12, "graphics_gi_strength", fallback: 6);
+            ToggleRow(SymbolRegular.Image24, L.T("Stochastic SSR (restart required)"), L.T("Keep the original screen-space reflections switch enabled. Unsupported shader layouts retain original reflections."),
+                () => Ini.Get("graphics_modern_ssr", "0") == "1", v => Ini.Set("graphics_modern_ssr", v ? "1" : "0"));
+            IniSlider(SymbolRegular.Image24, L.T("Reflection intensity"), 0, 3, "graphics_ssr_intensity");
+            ToggleRow(SymbolRegular.WeatherSunny24, L.T("PCSS sun shadows (restart required)"), L.T("Distance-dependent soft directional shadows; no point-light shadows or contact shadows are enabled."),
+                () => Ini.Get("graphics_pcss", "0") == "1", v => Ini.Set("graphics_pcss", v ? "1" : "0"));
+
+            Group(L.T("Shadows and volumetric lighting"));
+            ToggleRow(SymbolRegular.WeatherSunny24,L.T("Point-light shadows (live in game)"),L.T("Screen-space shadows on supported local lights. Off-screen occluders retain native lighting; additional GPU cost. Toggle live in the in-game overlay; launcher changes apply on the next launch."),
+                () => Ini.Get("graphics_point_shadows","0") == "1", v => Ini.Set("graphics_point_shadows",v ? "1" : "0"));
+            IniSlider(SymbolRegular.WeatherSunny24,L.T("Point shadow strength"),0,1,"graphics_point_shadow_strength",fallback: 0.85);
+            ToggleRow(SymbolRegular.WeatherSunny24,L.T("Contact shadows (live in game)"),L.T("Screen-space contact shadows; requires valid scene depth. Toggle live in the in-game overlay; launcher changes apply on the next launch."),
+                () => Ini.Get("graphics_contact_shadows","0") == "1", v => Ini.Set("graphics_contact_shadows",v ? "1" : "0"));
+            ToggleRow(SymbolRegular.WeatherSunny24,L.T("Volumetric sunlight (live in game)"),L.T("Directional light scattering; additional GPU cost. Toggle live in the in-game overlay; launcher changes apply on the next launch."),
+                () => Ini.Get("graphics_volumetric_light","0") == "1", v => Ini.Set("graphics_volumetric_light",v ? "1" : "0"));
+            ToggleRow(SymbolRegular.WeatherSunny24,L.T("Point-light volumetric fog (live in game)"),L.T("Fog illuminated by local lights; additional GPU cost. Toggle live in the in-game overlay; launcher changes apply on the next launch."),
+                () => Ini.Get("graphics_point_fog","0") == "1", v => Ini.Set("graphics_point_fog",v ? "1" : "0"));
+            ToggleRow(SymbolRegular.WeatherSunny24,L.T("Directional filtering and cascade blend (restart required)"),L.T("Atlas-safe directional filtering and guarded 10% cascade overlap."),
+                () => Ini.Get("graphics_directional_filter","0") == "1", v => Ini.Set("graphics_directional_filter",v ? "1" : "0"));
+            IniSlider(SymbolRegular.WeatherSunny24,L.T("Contact shadow strength"),0,1,"graphics_contact_strength",fallback: 0.75);
+            IniSlider(SymbolRegular.WeatherSunny24,L.T("Sunlight volume intensity"),0,3,"graphics_volumetric_intensity",fallback: 1);
+            IniSlider(SymbolRegular.WeatherSunny24,L.T("Point fog intensity"),0,3,"graphics_point_fog_intensity",fallback: 1);
+            IniCombo(SymbolRegular.Image24,L.T("Directional shadow resolution (restart required)"),L.T("Higher resolutions use more VRAM. Original preserves the game settings."),
+                new[] { new Choice(L.T("Original"),"0"), new Choice(L.T("High (4096 atlas)"),"1"), new Choice(L.T("Ultra (8192 atlas)"),"2") },"graphics_shadow_resolution");
+            IniCombo(SymbolRegular.Image24,L.T("Local shadow resolution (restart required)"),L.T("Higher resolutions use more VRAM. Original preserves the game settings."),
+                new[] { new Choice(L.T("Original"),"0"), new Choice(L.T("High (point 1024 / spot 2048)"),"1"), new Choice(L.T("Ultra (point 2048 / spot 4096)"),"2") },"graphics_local_shadow_resolution");
+
             Group(L.T("Picture"));
             var picture = new StackPanel();
             IniToggle(SymbolRegular.Color24, L.T("Picture tuning"), L.T("Turns the settings below on, live. Also in the game's System menu (PC Graphics, PC Effects, PC Colour) and the Insert menu"), "graphics_controls");

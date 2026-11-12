@@ -1,0 +1,510 @@
+diff --git a/gpu/CMakeLists.txt b/gpu/CMakeLists.txt
+--- a/gpu/CMakeLists.txt
++++ b/gpu/CMakeLists.txt
+@@ -335,6 +335,10 @@
+ add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
+ target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+ target_include_directories(motion-history-test PRIVATE ..)
++add_executable(tier1-live-test EXCLUDE_FROM_ALL ../tests/test_tier1_live.cpp)
++target_compile_options(tier1-live-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
++target_include_directories(tier1-live-test PRIVATE ..)
++
+ add_executable(occlusion-test EXCLUDE_FROM_ALL ../tests/test_occlusion.cpp)
+ target_compile_options(occlusion-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+ target_include_directories(occlusion-test PRIVATE ..)
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/tier1_live_settings.h b/gpu/shadps4/video_core/renderer_vulkan/tier1_live_settings.h
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/renderer_vulkan/tier1_live_settings.h
+@@ -0,0 +1,21 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#pragma once
++#include <cstdint>
++namespace Vulkan::Tier1Live {
++struct Settings {
++    bool ssgi=false, contact=false, sunlight=false, point_fog=false, point_shadows=false;
++    constexpr std::uint32_t Bits() const {
++        return unsigned(ssgi) | unsigned(contact)<<1 | unsigned(sunlight)<<2 |
++               unsigned(point_fog)<<3 | unsigned(point_shadows)<<4;
++    }
++};
++struct FrameState {
++    Settings active;
++    // Called only by the recording owner between frames, never from UI callbacks.
++    constexpr std::uint32_t Latch(Settings requested) {
++        const auto changed=active.Bits() ^ requested.Bits();
++        active=requested;
++        return changed;
++    }
++};
++} // namespace Vulkan::Tier1Live
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.cpp
+@@ -79,7 +79,7 @@
+         return;
+     }
+     const auto& settings = BbSettings::Get();
+-    use_contact = settings.startup_contact_shadows;
++    use_contact = contact_enabled;
+     strength = settings.graphics_contact_strength;
+     use_pcss = inputs.uniforms && inputs.shadow_map &&
+                settings.startup_pcss;
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.h b/gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.h
+@@ -41,6 +41,11 @@
+     void OnBlurDraw(VideoCore::ImageId target, VAddr source);
+ 
+     void Flush(bool native_blur = false);
++    void OnFrameEnd() { pending = {}; }
++    void SetContactEnabled(bool value) {
++        if (contact_enabled != value) pending = {};
++        contact_enabled = value;
++    }
+ 
+ private:
+     bool Ready();
+@@ -58,6 +63,7 @@
+     vk::UniqueSampler sampler;
+     VideoCore::ImageId pending;
+     Inputs pending_inputs;
++    bool contact_enabled = false;
+     bool use_contact = false;
+     bool use_pcss = false;
+     bool use_filter = false;
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_frame_generation.h b/gpu/shadps4/video_core/renderer_vulkan/vk_frame_generation.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_frame_generation.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_frame_generation.h
+@@ -69,6 +69,8 @@
+ 
+     /// Start of a frame in the command stream: the inputs below belong to the next frame.
+     void OnFrameStart();
++    /// Recording-owner request: the next prepared job starts fresh and is not interpolated.
++    void ResetHistory() { need_reset = true; }
+     /// Right after the upscaler's motion pass: the scene depth (`depth_view`, depth aspect,
+     /// General layout) and the motion vectors (`motion`, RG16F, General), render size `w` x `h`.
+     /// `jitter` in render pixels with the upscaler's sign.
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_point_shadow.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_point_shadow.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_point_shadow.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_point_shadow.cpp
+@@ -113,7 +113,7 @@
+                               const Inputs& inputs) {
+     if (failed || !color0 || !color1 || color0 == color1 || !inputs.count ||
+         !inputs.constants || !inputs.lights ||
+-        !BbSettings::Get().startup_point_shadows ||
++        !enabled ||
+         !Ready()) {
+         return false;
+     }
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_point_shadow.h b/gpu/shadps4/video_core/renderer_vulkan/vk_point_shadow.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_point_shadow.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_point_shadow.h
+@@ -41,6 +41,10 @@
+     bool OnLightDraw(VideoCore::ImageId color0, VideoCore::ImageId color1, const Inputs& inputs);
+ 
+     void Flush();
++    void SetEnabled(bool value) {
++        if (enabled != value) pending = {};
++        enabled = value;
++    }
+ 
+ private:
+     bool Ready();
+@@ -75,6 +79,7 @@
+     float fade_end_m = 30.0f;
+     float bias_m = 0.03f;
+     u32 steps = 16;
++    bool enabled = false;
+     bool tried = false;
+     std::array<s32, 4> pending_rect{};
+     bool failed = false;
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp
+@@ -94,6 +94,7 @@
+     hdr_native = std::make_unique<HdrNative>(instance, scheduler, texture_cache, runtime);
+     upscaler = std::make_unique<TemporalUpscaler>(instance, scheduler, texture_cache, runtime,
+                                                   *camera_motion, *scene_targets, *hdr_native);
++    Tier1ApplyLiveSettings(true);
+     if (!EmulatorSettings.IsNullGPU()) {
+         liverpool->BindRasterizer(this);
+     }
+@@ -652,8 +653,8 @@
+         camera_motion->OnGBufferPass(db_desc.first, vp.xscale < 0.0f ? -1.0f : 1.0f,
+                                      vp.yscale < 0.0f ? -1.0f : 1.0f);
+     }
+-    if (gbuffer_draw && (BbSettings::Get().startup_volumetric_light || BbSettings::Get().startup_point_fog)) volumetric_light->Reset();
+-    if (gbuffer_draw && BbSettings::Get().startup_ssgi)
++    if (gbuffer_draw && (tier1_live.active.sunlight || tier1_live.active.point_fog)) volumetric_light->Reset();
++    if (gbuffer_draw && tier1_live.active.ssgi)
+         ssgi->OnGBufferDraw(db_desc.first, cb_descs[2].first, cb_descs[0].first);
+     const auto* tier1_ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+     if (tier1_ps && tier1_ps->pgm_hash == Gtao::SsaoHash && cb_descs[0].first && Gtao::active.load())
+@@ -1931,6 +1932,11 @@
+     const auto& regs = Regs();
+     // bbport: the pass copying a finished frame to a display buffer; the previous draw's
+     // target is that frame.
++    if (!camera_motion->Enabled() && regs.color_buffers[0] &&
++        FrameCapture::IsDisplayBuffer(regs.color_buffers[0].Address())) {
++        contact_shadow->OnFrameEnd();
++        Tier1ApplyLiveSettings();
++    }
+     if (camera_motion->Enabled() && regs.color_buffers[0] &&
+         FrameCapture::IsDisplayBuffer(regs.color_buffers[0].Address())) {
+         scene_started = false;
+@@ -1943,6 +1949,8 @@
+         ssr_temporal->OnFrameEnd();
+         tier1_scene_color = {};
+         camera_motion->OnDisplayPass(cb_descs[0].first);
++        contact_shadow->OnFrameEnd();
++        Tier1ApplyLiveSettings();
+         if (upscaler->OnFrameStart()) {
+             object_motion->InvalidateHistory();
+             camera_motion->InvalidateHistory();
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h b/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h
+@@ -14,6 +14,7 @@
+ #include "video_core/buffer_cache/buffer_cache.h"
+ #include "video_core/page_manager.h"
+ #include "video_core/renderer_vulkan/vk_bind_helper.h"
++#include "video_core/renderer_vulkan/tier1_live_settings.h"
+ #include "video_core/renderer_vulkan/vk_camera_motion.h"
+ #include "video_core/renderer_vulkan/vk_constant_ring.h"
+ #include "video_core/renderer_vulkan/vk_scene_resolution.h"
+@@ -580,6 +581,8 @@
+     std::unique_ptr<ContactShadow> contact_shadow;
+     std::unique_ptr<VolumetricLight> volumetric_light;
+     std::unique_ptr<PointShadow> point_shadow;
++    Tier1Live::FrameState tier1_live;
++    void Tier1ApplyLiveSettings(bool initial = false);
+     bool Tier1PointShadowBeforeDraw(const GraphicsPipeline*);
+     void Tier1AfterDraw(const GraphicsPipeline*);
+     VideoCore::ImageId tier1_scene_color;
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_ssgi.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_ssgi.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_ssgi.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_ssgi.cpp
+@@ -251,7 +251,7 @@
+ void ScreenSpaceGI::OnOpaqueScene(VideoCore::ImageId color_id, VideoCore::ImageId depth_id,
+                                   std::array<float, 2> jitter) {
+     if (done_this_frame || failed || !color_id || !depth_id ||
+-        !BbSettings::Get().startup_ssgi ||
++        !enabled ||
+         !Ready()) {
+         return;
+     }
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_ssgi.h b/gpu/shadps4/video_core/renderer_vulkan/vk_ssgi.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_ssgi.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_ssgi.h
+@@ -35,6 +35,12 @@
+     void OnAoDraw(VideoCore::ImageId ao);
+ 
+     void OnFrameEnd();
++    void InvalidateHistory() { history_valid = prev_camera_valid = false; }
++    void SetEnabled(bool value) {
++        if (enabled == value) return;
++        enabled = value; InvalidateHistory();
++        OnFrameEnd();
++    }
+ 
+ private:
+     struct OwnImage {
+@@ -82,6 +88,7 @@
+     u32 frame = 0;
+     bool done_this_frame = false;
+     bool history_valid = false;
++    bool enabled = false;
+     bool failed = false;
+     bool tried = false;
+     VideoCore::ImageId gbuffer_depth, gbuffer_albedo, gbuffer_normal;
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_ssr_temporal.h b/gpu/shadps4/video_core/renderer_vulkan/vk_ssr_temporal.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_ssr_temporal.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_ssr_temporal.h
+@@ -46,6 +46,10 @@
+     void Flush(std::array<float, 2> jitter);
+ 
+     void OnFrameEnd();
++    void InvalidateHistory() {
++        history_valid = full_history_valid = prev_camera_valid = false;
++        OnFrameEnd();
++    }
+ 
+ private:
+     struct OwnImage {
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
+@@ -387,6 +387,12 @@
+ 
+ bool TemporalUpscaler::RasterScaling() const {
+     return !scaled_session && scene_targets.Reduced() && !done_this_frame;
++}
++
++void TemporalUpscaler::ResetSceneHistory() {
++    reset = true;
++    if (dlss_nr) dlss_nr->ResetHistory();
++    if (frame_gen) frame_gen->ResetHistory();
+ }
+ 
+ bool TemporalUpscaler::OnFrameStart() {
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h
+@@ -80,6 +80,8 @@
+ 
+     /// Start of a frame in the command stream (display pass).
+     bool OnFrameStart();
++    /// Scene-effect switches invalidate temporal content, without reallocating or waiting.
++    void ResetSceneHistory();
+     /// bbport: native HDR output (vk_hdr_native.h). Right before OnFrameStart: the display pass
+     /// copies the finished frame into the display buffer at `address`; `frame` is the target
+     /// the previous draw rendered into.
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc b/gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc
+@@ -3,14 +3,14 @@
+ // Narrow dispatcher adapted to the existing recording thread, without the RT/volumetric systems.
+ void Rasterizer::Tier1BeforeTargets(const GraphicsPipeline* pipeline) {
+     const auto& settings = BbSettings::Get();
+-    if (!settings.startup_modern_ssr && !settings.startup_pcss && !settings.startup_contact_shadows &&
+-        !settings.startup_directional_filter && !settings.startup_volumetric_light && !settings.startup_point_fog) return;
++    if (!settings.startup_modern_ssr && !settings.startup_pcss && !tier1_live.active.contact &&
++        !settings.startup_directional_filter && !tier1_live.active.sunlight && !tier1_live.active.point_fog) return;
+     if (pipeline->IsCompute()) return;
+     const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+     const u64 hash = ps ? ps->pgm_hash : 0;
+     if (hash != Tier1Shaders::SsrHash) ssr_temporal->Flush(upscaler->Jitter());
+     contact_shadow->Flush(hash == 0x11ffdfb5);
+-    if (hash == 0xccbf44a6 && (settings.startup_volumetric_light || settings.startup_point_fog)) {
++    if (hash == 0xccbf44a6 && (tier1_live.active.sunlight || tier1_live.active.point_fog)) {
+         const auto camera = camera_motion->PassMatrices();
+         volumetric_light->SetCamera({camera.view,camera.inv_view,camera.valid});
+         volumetric_light->Composite();
+@@ -18,9 +18,9 @@
+ }
+ 
+ void Rasterizer::Tier1Scene() {
+-    if (BbSettings::Get().startup_ssgi && tier1_scene_color)
++    if (tier1_live.active.ssgi && tier1_scene_color)
+         ssgi->OnOpaqueScene(tier1_scene_color, camera_motion->Depth(), upscaler->Jitter());
+-    if (tier1_scene_color && (BbSettings::Get().startup_volumetric_light || BbSettings::Get().startup_point_fog)) {
++    if (tier1_scene_color && (tier1_live.active.sunlight || tier1_live.active.point_fog)) {
+         const auto camera = camera_motion->PassMatrices();
+         volumetric_light->SetCamera({camera.view,camera.inv_view,camera.valid});
+         volumetric_light->Scene(tier1_scene_color); // compose into the exact NR/SR input
+@@ -30,8 +30,8 @@
+ 
+ void Rasterizer::Tier1BeforeBind(const GraphicsPipeline* pipeline) {
+     const auto& settings = BbSettings::Get();
+-    if (!settings.startup_modern_ssr && !settings.startup_pcss && !settings.startup_contact_shadows &&
+-        !settings.startup_directional_filter && !settings.startup_volumetric_light && !settings.startup_point_fog) return;
++    if (!settings.startup_modern_ssr && !settings.startup_pcss && !tier1_live.active.contact &&
++        !settings.startup_directional_filter && !tier1_live.active.sunlight && !tier1_live.active.point_fog) return;
+     if (pipeline->IsCompute()) return;
+     const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+     if (!ps) return;
+@@ -56,9 +56,9 @@
+             image_infos[6].imageView = full;
+             image_infos[6].imageLayout = vk::ImageLayout::eGeneral;
+         }
+-    } else if (hash == 0x11ffdfb5 && (settings.startup_pcss || settings.startup_contact_shadows || settings.startup_directional_filter) && cb_descs[0].first) {
++    } else if (hash == 0x11ffdfb5 && (settings.startup_pcss || tier1_live.active.contact || settings.startup_directional_filter) && cb_descs[0].first) {
+         contact_shadow->OnBlurDraw(cb_descs[0].first, ps->images.empty() ? 0 : ps->images[0].GetSharp(*ps).Address());
+-    } else if (hash == 0xf55643de && (settings.startup_pcss || settings.startup_contact_shadows || settings.startup_directional_filter) && cb_descs[0].first &&
++    } else if (hash == 0xf55643de && (settings.startup_pcss || tier1_live.active.contact || settings.startup_directional_filter) && cb_descs[0].first &&
+                !buffer_infos.empty() && buffer_infos[0].buffer) {
+         const bool uniforms = buffer_infos.size() > 1 && buffer_infos[1].buffer;
+         const bool map = image_infos.size() > 1 && image_infos[1].imageView;
+@@ -78,7 +78,7 @@
+ // Current upstream lighting capture, restricted to G07/G08 (no point-shadow generator).
+ void Rasterizer::Tier1AfterDraw(const GraphicsPipeline* pipeline) {
+     const auto& settings=BbSettings::Get();
+-    if (!settings.startup_volumetric_light && !settings.startup_point_fog) return;
++    if (!tier1_live.active.sunlight && !tier1_live.active.point_fog) return;
+     const auto* ps=pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+     if (!ps) return;
+     const auto hash=ps->pgm_hash;
+@@ -93,7 +93,7 @@
+         volumetric_light->Tint(buffer_infos[0],push_data.buf_offsets[0] & 255u);
+     } else if (hash == 0x32e47788 && cb_descs[0].first) {
+         volumetric_light->Scene(cb_descs[0].first);
+-    } else if (settings.startup_point_fog && (pipeline->GetGraphicsKey().mrt_mask & 3) == 3 &&
++    } else if (tier1_live.active.point_fog && (pipeline->GetGraphicsKey().mrt_mask & 3) == 3 &&
+                cb_descs[0].first && cb_descs[1].first && ps->buffers.size() >= 2 &&
+                pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash == 0x8747a367) {
+         u32 count=0;
+@@ -211,7 +211,7 @@
+ // Pre-RT Lantern implementation: snapshot the two additive light targets, then attenuate
+ // only their new contribution. Unknown light families and indirect draws retain native lighting.
+ bool Rasterizer::Tier1PointShadowBeforeDraw(const GraphicsPipeline* pipeline) {
+-    if (!BbSettings::Get().startup_point_shadows ||
++    if (!tier1_live.active.point_shadows ||
+         BbSettings::Get().graphics_point_shadow_strength.load() <= 0.0f ||
+         (pipeline->GetGraphicsKey().mrt_mask & 3) != 3 ||
+         !cb_descs[0].first || !cb_descs[1].first || buffer_infos.size() < 2 ||
+@@ -236,3 +236,23 @@
+          .lights=buffer_infos[1].buffer,.lights_offset=buffer_infos[1].offset,.lights_range=buffer_infos[1].range,
+          .offsets=offsets,.count=count,.tile=dynamic.scissors[0]});
+ }
++
++void Rasterizer::Tier1ApplyLiveSettings(bool initial) {
++    const auto& settings=BbSettings::Get();
++    const auto changed=tier1_live.Latch({settings.graphics_ssgi.load(),
++        settings.graphics_contact_shadows.load(),settings.graphics_volumetric_light.load(),
++        settings.graphics_point_fog.load(),settings.graphics_point_shadows.load()});
++    if (!changed && !initial) return;
++    const auto& active=tier1_live.active;
++    ssgi->SetEnabled(active.ssgi);
++    ssgi->InvalidateHistory();
++    ssr_temporal->InvalidateHistory();
++    contact_shadow->SetContactEnabled(active.contact);
++    volumetric_light->SetEnabled(active.sunlight,active.point_fog);
++    point_shadow->SetEnabled(active.point_shadows);
++    // The scene content changed. Reset NR's model/look histories and downstream temporal
++    // reconstruction using their existing flag-only API; never drain an active command buffer.
++    if (!initial) upscaler->ResetSceneHistory();
++    std::printf("Tier 1 live: SSGI=%d contact=%d sunlight=%d point_fog=%d point_shadows=%d (frame boundary)\n",
++        int(active.ssgi),int(active.contact),int(active.sunlight),int(active.point_fog),int(active.point_shadows));
++}
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_volumetric_light.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_volumetric_light.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_volumetric_light.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_volumetric_light.cpp
+@@ -118,10 +118,8 @@
+ VolumetricLight::~VolumetricLight() = default;
+ 
+ bool VolumetricLight::Enabled() {
+-    const auto& settings = BbSettings::Get();
+     return !failed &&
+-           (settings.startup_volumetric_light ||
+-            settings.startup_point_fog) &&
++           (sun_enabled || point_enabled) &&
+            Ready();
+ }
+ 
+@@ -267,7 +265,7 @@
+         std::memory_order_relaxed);
+     const float live_strength = strength *
+         std::clamp(std::isfinite(intensity) ? intensity : 1.0f, 0.0f, 3.0f) *
+-        float(BbSettings::Get().startup_volumetric_light);
++        float(sun_enabled);
+     const Params params{in.constants_offset_word, steps, reach, density, live_strength,
+                         anisotropy, 0.02f, 0.0f};
+     const vk::DescriptorImageInfo di{*sampler, depth.imageView, depth.imageLayout};
+@@ -401,7 +399,7 @@
+ 
+ void VolumetricLight::AddPointLights(const u32* constants, const u32* lights, u32 count) {
+     if (!ready || !Enabled() ||
+-        !BbSettings::Get().startup_point_fog) {
++        !point_enabled) {
+         return;
+     }
+     if (fog_lights.Empty()) {
+@@ -536,7 +534,7 @@
+         const char* env = std::getenv("BB_POINT_FOG_STEADY");
+         return !(env && env[0] == '0');
+     }();
+-    if (!BbSettings::Get().startup_point_fog) {
++    if (!point_enabled) {
+         fog_memory.Clear();
+     } else if (!steady_fog) {
+         fog_memory.Clear();
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_volumetric_light.h b/gpu/shadps4/video_core/renderer_vulkan/vk_volumetric_light.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_volumetric_light.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_volumetric_light.h
+@@ -24,6 +24,12 @@
+     ~VolumetricLight();
+ 
+     void Reset() { ready = tinted = false; scene = {}; fog_lights.Clear(); }
++    void SetEnabled(bool sun, bool local) {
++        if (sun_enabled == sun && point_enabled == local) return;
++        sun_enabled = sun; point_enabled = local;
++        Reset(); fog_memory.Clear(); fog_memory_time = {}; tint_time = {};
++        fog_camera = {}; scene_uid = 0;
++    }
+     void Integrate(VideoCore::ImageId shadow_target, const vk::DescriptorImageInfo& depth,
+                    const ContactShadow::Inputs& inputs);
+     void Tint(const vk::DescriptorBufferInfo& lighting, u32 offset_bytes);
+@@ -81,6 +87,7 @@
+     float density = 0.025f;
+     float anisotropy = 0.4f;
+     u32 steps = 32;
++    bool sun_enabled = false, point_enabled = false;
+     bool ready = false;
+     bool tinted = false;
+     bool tried = false;
+diff --git a/gpu/shim/bbport_overlay.cpp b/gpu/shim/bbport_overlay.cpp
+--- a/gpu/shim/bbport_overlay.cpp
++++ b/gpu/shim/bbport_overlay.cpp
+@@ -695,7 +695,7 @@
+         if (ImGui::Checkbox(label, &high)) Store(s.graphics_ao_quality, high ? 1 : 0, true);
+         Hint("Requires GTAO. Full internal-resolution AO with spatial denoising; more GPU cost.");
+     }
+-    if (const char* label = Item("SSGI (restart required)", "SSGI (restart required)", "graphics_ssgi")) Checkbox(label, s.graphics_ssgi);
++    if (const char* label = Item("SSGI (live)", "SSGI (live)", "graphics_ssgi")) Checkbox(label, s.graphics_ssgi);
+     if (const char* label = Item("Indirect lighting strength", "Indirect lighting strength", "graphics_gi_strength")) {
+         float value = s.graphics_gi_strength;
+         if (ImGui::SliderFloat(label, &value, 0.0f, 12.0f)) Store(s.graphics_gi_strength, value, true);
+@@ -709,11 +709,11 @@
+         if (ImGui::SliderFloat(label, &value, 0.0f, 3.0f)) Store(s.graphics_ssr_intensity, value, true);
+     }
+     if (const char* label = Item("PCSS sun shadows (restart required)", "PCSS sun shadows (restart required)", "graphics_pcss")) Checkbox(label, s.graphics_pcss);
+-    if (const char* label=Item("Contact shadows (restart required)","Contact shadows (restart required)","graphics_contact_shadows")) Checkbox(label,s.graphics_contact_shadows);
+-    if (const char* label=Item("Volumetric sunlight (restart required)","Volumetric sunlight (restart required)","graphics_volumetric_light")) Checkbox(label,s.graphics_volumetric_light);
+-    if (const char* label=Item("Point-light volumetric fog (restart required)","Point-light volumetric fog (restart required)","graphics_point_fog")) Checkbox(label,s.graphics_point_fog);
++    if (const char* label=Item("Contact shadows (live)","Contact shadows (live)","graphics_contact_shadows")) Checkbox(label,s.graphics_contact_shadows);
++    if (const char* label=Item("Volumetric sunlight (live)","Volumetric sunlight (live)","graphics_volumetric_light")) Checkbox(label,s.graphics_volumetric_light);
++    if (const char* label=Item("Point-light volumetric fog (live)","Point-light volumetric fog (live)","graphics_point_fog")) Checkbox(label,s.graphics_point_fog);
+     if (const char* label=Item("Directional filtering and cascade blend (restart required)","Directional filtering and cascade blend (restart required)","graphics_directional_filter")) Checkbox(label,s.graphics_directional_filter);
+-    if (const char* label=Item("Point-light shadows (restart required)","Point-light shadows (restart required)","graphics_point_shadows")) Checkbox(label,s.graphics_point_shadows);
++    if (const char* label=Item("Point-light shadows (live)","Point-light shadows (live)","graphics_point_shadows")) Checkbox(label,s.graphics_point_shadows);
+     if (const char* label=Item("Point shadow strength","Point shadow strength","graphics_point_shadow_strength")) {
+         float value=s.graphics_point_shadow_strength; if (ImGui::SliderFloat(label,&value,0.0f,1.0f)) Store(s.graphics_point_shadow_strength,value,true);
+     }
+@@ -2000,14 +2000,10 @@
+ 
+     const float footer_top = ImGui::GetCursorPosY();
+     bool restart =
+-        s.graphics_contact_shadows != s.startup_contact_shadows ||
+-        s.graphics_volumetric_light != s.startup_volumetric_light ||
+-        s.graphics_point_fog != s.startup_point_fog ||
+-        s.graphics_point_shadows != s.startup_point_shadows ||
+         s.graphics_directional_filter != s.startup_directional_filter ||
+         s.graphics_shadow_resolution != s.startup_shadow_resolution ||
+         s.graphics_local_shadow_resolution != s.startup_local_shadow_resolution ||
+-        s.graphics_ao_quality != s.startup_ao_quality || s.graphics_ssgi != s.startup_ssgi ||
++        s.graphics_ao_quality != s.startup_ao_quality ||
+         s.graphics_modern_ssr != s.startup_modern_ssr || s.graphics_pcss != s.startup_pcss ||
+         s.graphics_gtao != s.startup_gtao ||
+         s.object_motion != s.startup_object_motion || s.model_lod != s.startup_model_lod ||
+diff --git a/tests/test_tier1_live.cpp b/tests/test_tier1_live.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/test_tier1_live.cpp
+@@ -0,0 +1,26 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#include <cassert>
++#include <cstdio>
++#include "gpu/shadps4/video_core/renderer_vulkan/tier1_live_settings.h"
++using namespace Vulkan::Tier1Live;
++constexpr Settings FromBits(unsigned n) {
++    return {bool(n&1),bool(n&2),bool(n&4),bool(n&8),bool(n&16)};
++}
++int main() {
++    FrameState frame;
++    assert(frame.active.Bits()==0);
++    unsigned transitions=0;
++    for(unsigned repeat=0;repeat<8;++repeat) for(unsigned a=0;a<32;++a) {
++        frame.Latch(FromBits(a));
++        for(unsigned b=0;b<32;++b) {
++            auto requested=FromBits(b);
++            assert(frame.active.Bits()==a); // a menu request cannot modify this frame
++            const auto changed=frame.Latch(requested);
++            assert(changed==(a^b)); assert(frame.active.Bits()==b);
++            assert(frame.Latch(requested)==0); // steady state does not invalidate histories
++            frame.Latch(FromBits(a));
++            ++transitions;
++        }
++    }
++    std::printf("Tier 1 live: PASS (%u mixed transitions; stable frame snapshot and no-op changes)\n",transitions);
++}

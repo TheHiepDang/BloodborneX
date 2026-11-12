@@ -86,6 +86,38 @@ credited in the code.
 
 ## Build
 
+The first live-toggle batch follows all four Tier 1 supplements. Apply
+`python tools/apply-tier1-live-toggles.py <engine-source>` after
+`tier1-final-renderer.patch`. The five compute-effect switches latch between
+frames; shader substitutions and native shadow hooks still require restart.
+See [LIVE-TOGGLES.md](../docs/tier1-graphics/LIVE-TOGGLES.md).
+
+G11-G13 finish the reviewed Tier 1 scope in `tier1-final-renderer.patch`. Apply
+`python tools/apply-tier1-final-renderer.py <engine-source>` **after** GTAO,
+lighting and atmosphere/shadows supplements. Point shadows default off. See
+[`docs/tier1-graphics/G11-G13.md`](../docs/tier1-graphics/G11-G13.md) for the
+matched pre-RT source, conservative occlusion policy and camera optimization.
+
+G06-G10 follow as `tier1-atmosphere-shadows.patch`, applied after the M1 GTAO and
+G02-G05 lighting supplements. Use
+`python tools/apply-tier1-atmosphere-shadows.py <engine-source>` for guarded
+source validation/application. See
+[`docs/tier1-graphics/G06-G10.md`](../docs/tier1-graphics/G06-G10.md).
+
+The subsequent G02-G05 development batch adds HQ GTAO, screen-space indirect
+lighting, stochastic SSR and PCSS. Apply `tier1-lighting.patch` after the M1
+GTAO supplement using `python tools/apply-tier1-lighting.py <engine-source>`.
+The helper checks all preimage and output hashes; do not apply either supplement
+again to an already-applied source ZIP. See
+[`docs/tier1-graphics/G02-G05.md`](../docs/tier1-graphics/G02-G05.md).
+
+For the optional M1 GTAO development feature, apply `tier1-gtao.patch` **after**
+the v1.0.3 NR controls supplement. `python tools/apply-tier1-gtao.py <engine-source>`
+verifies the source against `tier1-gtao-baseline.json` before applying it.
+The feature defaults off and retains the original SSAO pass when disabled.
+See [`docs/tier1-graphics/README.md`](../docs/tier1-graphics/README.md) for the
+upstream commits, build/test instructions, compatibility limits and roadmap.
+
 For the v1.0.3 native NR look controls and their matching launcher,
 see [`docs/NR-RELEASE.md`](../docs/NR-RELEASE.md). Its supplemental
 `nr-look-controls.patch` targets the applied source identified by

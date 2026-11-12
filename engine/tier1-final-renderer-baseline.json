@@ -1,0 +1,92 @@
+{
+  "description": "G11-G13 supplement after GTAO, lighting and atmosphere/shadows on the applied v1.0.3 NR engine. Point-shadow source: Lantern 4889a8a8bd72d74adc7ce49b89ddd951eba48bd2; occlusion/camera policy compared with current upstream.",
+  "bloodbornex_commit": "5710aeb4626cc5f86ba0730b9afc3e1de5c4442d",
+  "upstream_commit": "573f83fd366d70bf26ce788edb9775a1b863676a",
+  "files": [
+    {
+      "path": "gpu/CMakeLists.txt",
+      "baseline_sha256": "81c42adfb62b2ece0d5b084aadcc3c7bd58466c04145d2907da2972febd04bd3",
+      "modified_sha256": "ca384fca9d57ae735c0f15685ef3f80bdc0afdfa27c0e9215456a2409930d133"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/point_shadow.comp",
+      "baseline_sha256": null,
+      "modified_sha256": "f1e1f67d04b5ccd555a959abcf691f28d4c63bbb9cc494f77356c8fe84b9ada3"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/occlusion_model.h",
+      "baseline_sha256": "885957b32e60ac81c76675c3c5f3a4e88ca6ee2fe1358cb6a5a869e8959d0184",
+      "modified_sha256": "45fba1765ed1979d2d6fb041598080bab3f624b2753735ba62a2ebb38d67db3d"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_camera_motion.cpp",
+      "baseline_sha256": "b15e9809790768a4d398afe971fa525fe12231adb54171be0cb8a23fe3dd2135",
+      "modified_sha256": "5b6235427b5eb3fd4c0bc2269e564f7dd15dd2c61fdc8f8d8e5b86b408895393"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_occlusion.cpp",
+      "baseline_sha256": "155119d48359c3fc273ab15d694dd33e3f7a49beeb0af2ed00405850303b9c08",
+      "modified_sha256": "7b072365ebe0affd1ebd745009578c6d0110831c95ab36991e3a0903a2b96020"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_point_shadow.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "148decaa382a2702a89657c4b0160af39e76431a9a3e60cf28b189177af9c2db"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_point_shadow.h",
+      "baseline_sha256": null,
+      "modified_sha256": "6ebad1401cb1889e30ba8032d6c16a14f9da2ada5c2398bae02a01488f6c19c5"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp",
+      "baseline_sha256": "431ba23857825f44420300f37362d19371ce9cfda43f1e70ed469c578aa70e1d",
+      "modified_sha256": "5d0e1995cfe8494c5a16dd12bf3e1cc3f6ba0a17483badeb075033fbce003705"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h",
+      "baseline_sha256": "240b0c9f85b406df21a830ca3774557175c6bdcf7fe9c86edb4ee08fad843ba6",
+      "modified_sha256": "0c55a90c89f418712becff51686b893ece97498a8a71775e8534daf8a5cef939"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc",
+      "baseline_sha256": "6827da6e0e8d3c10b7e9177a202e1c115a453a65321f9d2a2b33078e1e2af9d6",
+      "modified_sha256": "9d759cf4bc6550d849d7f3c654eb91de21297256082a707c7173afe85a9f0620"
+    },
+    {
+      "path": "gpu/shim/bbport_overlay.cpp",
+      "baseline_sha256": "8b659ed78b8f80ac4e1a39c43ee4992779c7165a900d03377daadd39c122e45e",
+      "modified_sha256": "b78120f32889bfddd70f417d6f8c2be49ca8c2ed6be192f77062da1b9bda6336"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.cpp",
+      "baseline_sha256": "62c47835e754c609da8d9f03123103b37b84ef178d1ee0fc23ddc3fc5fb394be",
+      "modified_sha256": "36ece6983aaef2e1a4a66f9adda69c43fdb91b015f71381d3a92999964303831"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.h",
+      "baseline_sha256": "63591874ade07873169efb5aed53c85c1fbbd74ee0beb354176eeaeaf63d8885",
+      "modified_sha256": "c18047bf3f256ee7fd82d39cc0dd1fdb8dcc6ed284fc7aae2ab06c1711ac5499"
+    },
+    {
+      "path": "tests/test_occlusion.cpp",
+      "baseline_sha256": "6e766cc75a87e888217b3cc80f1e7b08e323a0fc00d4a82ad885efa2cd40f671",
+      "modified_sha256": "e3976b61a03f4c519ce653b8f8289661b252ce652d43fbb9a05d8a72c19e97c8"
+    },
+    {
+      "path": "tests/test_point_shadow.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "455b0cfea275bf07d459c9d4812dcb8bea40d5565668d14dfb4d19eafe82e7fd"
+    },
+    {
+      "path": "tests/test_settings.cpp",
+      "baseline_sha256": "efd3d0a914437a16d7e544df6494692e1acc34f05e884c0a0ffd342070616532",
+      "modified_sha256": "74fc5b939d6dba7dc3eded5c7e53ed2aa20a6ec5d3d4a9261f55fd75d972df92"
+    },
+    {
+      "path": "tests/test_tier1_effect_pipelines.cpp",
+      "baseline_sha256": "3da5cc0b363a7fa6a855ceb3098cc4ad14f142cd48c71eb72a183750fac333bb",
+      "modified_sha256": "1c8aa36ba3262b1d10d6137682b400e8ce678bc7bbfd840c26667e50d37cdd1b"
+    }
+  ]
+}

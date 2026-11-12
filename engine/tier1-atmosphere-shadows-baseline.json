@@ -1,0 +1,132 @@
+{
+  "description": "G06-G10 supplement after M1 GTAO and G02-G05 lighting on the applied v1.0.3 NR engine.",
+  "bloodbornex_commit": "5710aeb4626cc5f86ba0730b9afc3e1de5c4442d",
+  "upstream_commit": "573f83fd366d70bf26ce788edb9775a1b863676a",
+  "files": [
+    {
+      "path": "gpu/CMakeLists.txt",
+      "baseline_sha256": "332c541802bf1519a57014b429238df0e2aca64d2ac9a72e73e8bedc8d03a681",
+      "modified_sha256": "81c42adfb62b2ece0d5b084aadcc3c7bd58466c04145d2907da2972febd04bd3"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/point_volumetric.comp",
+      "baseline_sha256": null,
+      "modified_sha256": "1b11b18c19e8d0c905c5dcd018ce6c67d57052bf9055ce4462fbf4662d1dc11a"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/volumetric_light.comp",
+      "baseline_sha256": null,
+      "modified_sha256": "e30ebd50cfc487060a13238e956f94c793aabf83e45c36dceb7d379608bd090b"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/lamp_fog_lights.h",
+      "baseline_sha256": null,
+      "modified_sha256": "a141cb39323876ad5ab0a81a75f4a7312408299ea14194e6402b2aa7ade8f83e"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.cpp",
+      "baseline_sha256": "31bb2000962082429b08a0890cafacc4387bddf5d62fa802b0e5913ecfa8685a",
+      "modified_sha256": "0b42a8712be97a2f36bb534071539d8e668858b7e10e0aba803c143ad5d0f2bb"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp",
+      "baseline_sha256": "bc9cb0dac602dc2adaa649fd55db64ff3eaff6bd2a5e30e8a077668df2cba1f4",
+      "modified_sha256": "431ba23857825f44420300f37362d19371ce9cfda43f1e70ed469c578aa70e1d"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h",
+      "baseline_sha256": "b7beb7e4b21734515603ef5f271899d7d204a6fac17e8e2a1803fe475ecc79fb",
+      "modified_sha256": "240b0c9f85b406df21a830ca3774557175c6bdcf7fe9c86edb4ee08fad843ba6"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc",
+      "baseline_sha256": "93fb6e4cd5e46fec69c2a8864498c3132bb6240c61569f7cb35d1190fdba569c",
+      "modified_sha256": "6827da6e0e8d3c10b7e9177a202e1c115a453a65321f9d2a2b33078e1e2af9d6"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_volumetric_light.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "1ed481ce4326cedb0de667ac6de6ff28b109249ec0401615b50bec1fba0d2e4b"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_volumetric_light.h",
+      "baseline_sha256": null,
+      "modified_sha256": "aba6bfbf85931045e0fe01c07c98823086a10a2748f2a97971b2afe3d3f2c7c2"
+    },
+    {
+      "path": "gpu/shim/bbport_overlay.cpp",
+      "baseline_sha256": "5773d708d0568452136e1bc7557f56b88c5a744276554236fcdc69efc58e13b3",
+      "modified_sha256": "8b659ed78b8f80ac4e1a39c43ee4992779c7165a900d03377daadd39c122e45e"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.cpp",
+      "baseline_sha256": "b802da01cf28aa9adbc623b208605c51492ba895553241b2f3ec0fba9695e69d",
+      "modified_sha256": "62c47835e754c609da8d9f03123103b37b84ef178d1ee0fc23ddc3fc5fb394be"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.h",
+      "baseline_sha256": "03386e3ca1e2b32539c7f4b12471424677c4c77028ead9ac6addd043c79ebf63",
+      "modified_sha256": "63591874ade07873169efb5aed53c85c1fbbd74ee0beb354176eeaeaf63d8885"
+    },
+    {
+      "path": "gpu/shim/engine/change_appearance.cpp",
+      "baseline_sha256": "c6f18bf891733506cc75c2c075458b954b3930141c97832a474fb95617d845cd",
+      "modified_sha256": "64a847e3affa20540b93a60e7cf1e01b71850d333fa5ebcac2618e5b1546b208"
+    },
+    {
+      "path": "gpu/shim/engine/engine_hooks.cpp",
+      "baseline_sha256": "31f159f90c8e9c7e5324fcd9faf02506f4b35365f321366de0b1584f3f3a4384",
+      "modified_sha256": "fc8dd5c90e1f0d69e93dcd56e99761042d4cebc20926410e90bb83db969ee0dc"
+    },
+    {
+      "path": "gpu/shim/engine/engine_hooks.h",
+      "baseline_sha256": "5bbb37c9f99030537a2b4987cf1f51279081d620b860815eb5005de594f403ff",
+      "modified_sha256": "502854a5262b6065a912618e29c66efbc5bd055ea019f9621c11e56a2ecbc288"
+    },
+    {
+      "path": "gpu/shim/engine/graphics.h",
+      "baseline_sha256": "1f3949f2dadfaa25dc7dbfdaa64fd0ab96ad8cd2fdf1cdce57cad5dd844e1a00",
+      "modified_sha256": "cba7960bfe5caa84fc920f391644d7362bf4287c6fc0c19d5e36d36794c0412c"
+    },
+    {
+      "path": "gpu/shim/engine/shadow_controls.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "ef73812ea4d7638b913917206946d0c710c7c191ea078c0ebdbb2dff08b353c7"
+    },
+    {
+      "path": "tests/test_lamp_fog_lights.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "da5b8075b13e8adb88256443d0cd207fdc081d1502e45bb80a68761effe0f162"
+    },
+    {
+      "path": "tests/test_native_local_shadows.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "464368ce9a5df53e4c69e2516ff172f0576b13314773adf4b6bab18bf3eeee51"
+    },
+    {
+      "path": "tests/test_point_volumetric.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "83668e08db45cea9eb929176d6f11c0af9952bb7e1a6167107a0eacee87936bc"
+    },
+    {
+      "path": "tests/test_settings.cpp",
+      "baseline_sha256": "ad30cd1e61e210c30e3a65f223c1691e943d16af243542c88c9902ae43157b46",
+      "modified_sha256": "efd3d0a914437a16d7e544df6494692e1acc34f05e884c0a0ffd342070616532"
+    },
+    {
+      "path": "tests/test_shadow_context.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "7b505a882ceeec8f806338405744621a33b15d40a0edf83bee39a935af8537c0"
+    },
+    {
+      "path": "tests/test_tier1_effect_pipelines.cpp",
+      "baseline_sha256": "837914c806839d853763e1f395744ea687d63f558b6e250f836aed17579790c2",
+      "modified_sha256": "3da5cc0b363a7fa6a855ceb3098cc4ad14f142cd48c71eb72a183750fac333bb"
+    },
+    {
+      "path": "tests/test_volumetric_tint.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "d47ddcc6d21518a6aaec8e5c4b27ac07bd72e86b397cec1c1fddca8156cabc85"
+    }
+  ]
+}

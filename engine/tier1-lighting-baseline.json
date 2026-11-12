@@ -1,0 +1,188 @@
+{
+  "description": "G02-G05 supplement applied after the M1 regular GTAO supplement to v1.0.3 NR source.",
+  "bloodbornex_commit": "5710aeb4626cc5f86ba0730b9afc3e1de5c4442d",
+  "upstream_current": "573f83fd366d70bf26ce788edb9775a1b863676a",
+  "upstream_pre_raytracing": "4889a8a8bd72d74adc7ce49b89ddd951eba48bd2",
+  "files": [
+    {
+      "path": "gpu/CMakeLists.txt",
+      "baseline_sha256": "481b071847580d3b52664c0f7ff99c6e868bd4e90e16afa60c55ae871fb87ef2",
+      "modified_sha256": "332c541802bf1519a57014b429238df0e2aca64d2ac9a72e73e8bedc8d03a681"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/contact_shadow.comp",
+      "baseline_sha256": null,
+      "modified_sha256": "42074dda600051851901f22ffb802e217580409673e4773d702469bcb1145824"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/gtao_denoise.comp",
+      "baseline_sha256": null,
+      "modified_sha256": "4873adc32e7de626e7d7237c04d4f9473c8287ddf92e7171ece111953186013c"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/ssgi.comp",
+      "baseline_sha256": null,
+      "modified_sha256": "1a9d1dcea2bd81ac3a9d787eedaadd205f6f4b6b8d45e771c0b5cb6bdaa358ee"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/ssr.frag",
+      "baseline_sha256": null,
+      "modified_sha256": "aeb30111a892e619c9088999cc84737a32da74fb8757902ccd3f0416bc126c8c"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/ssr_temporal.comp",
+      "baseline_sha256": null,
+      "modified_sha256": "d7e480d8ff53b3f00cf6950cba68243ffdeeb13e1cb9e525f2f7d1126325550f"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/ssr_trace.comp",
+      "baseline_sha256": null,
+      "modified_sha256": "e499c3713f319e6ec7516ecdfee18a01bb0befa93a6e828a844f7b75b555fe47"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_ao_spatial.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "6071a9a8d854e9183ba0793e2359b5a0e8e0505232a7ef1a01b863c4b3455ff0"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_ao_spatial.h",
+      "baseline_sha256": null,
+      "modified_sha256": "e08c045970ce742ed37aa7bd4ed32894fefae889f61fb87b1564536fe0cbf303"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_camera_motion.h",
+      "baseline_sha256": "64bb4e9bc2f2e3e08af504340474a98180911a32541c1861e4ab0e86740dc2ef",
+      "modified_sha256": "bfb97a154338701b66e6ddd510820cc269f879896f90c0f199a1aa73f1d24348"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "31bb2000962082429b08a0890cafacc4387bddf5d62fa802b0e5913ecfa8685a"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.h",
+      "baseline_sha256": null,
+      "modified_sha256": "b51fd3c27c6e367f0b87bf138a47f4fba446df381dc3a5b0cd850d3f58d6759f"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_effect_pass.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "ae4f21888b2a55e4e2660b165d49aaa82c57b82c624ba7a1fe11c39aab0e36f8"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_effect_pass.h",
+      "baseline_sha256": null,
+      "modified_sha256": "3815d9ab50fc197af98ad87fb3b06431a45d58226521b603b58e15ef7a2355e7"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_gtao.h",
+      "baseline_sha256": "8eddae5360fe4ef3469ca6e61cb6aed063fb0a0beda80cb446710ca5eba21c4e",
+      "modified_sha256": "53a37fca389e63ab68f850d00ba6cdb1d803a7c6b241d51834733a3fc1c4051c"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_cache.cpp",
+      "baseline_sha256": "0681273bd720968a67f156303e929a79ac7d8439baecf7c98b8ce780e6766e6e",
+      "modified_sha256": "b1048b00235134a5d80a55d03795dd22ba298ee325787d3335e0690ff80fd1a2"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_serialization.cpp",
+      "baseline_sha256": "c766e0c05243c63f99dd10df7b34366bdc6ef00a5e75fa1831b19118be185417",
+      "modified_sha256": "1b5a344ad94b519c607e8fc1aba3f47f00daeec7e2991bd38716fb23fb5098c9"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp",
+      "baseline_sha256": "61273444d023a192d522d59ba08f00c1fa473d414524c89e36748c57c29ff8b8",
+      "modified_sha256": "bc9cb0dac602dc2adaa649fd55db64ff3eaff6bd2a5e30e8a077668df2cba1f4"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h",
+      "baseline_sha256": "52c6f7789c43e30d051343edbac927cda17bb9eaaf05e8ade4640245a565b6dc",
+      "modified_sha256": "b7beb7e4b21734515603ef5f271899d7d204a6fac17e8e2a1803fe475ecc79fb"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_ssgi.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "c7afb8141e8be6df8c54c2dcd49890f8df6c3a64dadd690f14e2de77552a3d98"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_ssgi.h",
+      "baseline_sha256": null,
+      "modified_sha256": "52ec5e98efe66e30eb5768c31eb82a7f0153ce48f5a3f3edc5b7547c2068b726"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_ssr_composite_patch.h",
+      "baseline_sha256": null,
+      "modified_sha256": "76b6900c659f5688f1016898ef1226a36d423ab8cbfba939c2acd9f362ad773a"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_ssr_temporal.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "a67fddce382d096812470a27c460baaa5f5d64ce4961d4d69f1fc6d699c82905"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_ssr_temporal.h",
+      "baseline_sha256": null,
+      "modified_sha256": "422b8a19052ed7feb178945eaccae9ef22025070512301c095a7aaaa43455cc8"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h",
+      "baseline_sha256": "5126b97de3c1d6564795ceca67a02bbd32b925224810e1141af7225bd313e2d8",
+      "modified_sha256": "d3582cfa850b59b7466ad395f13713bfe439e1ca5dfdfbba59beed0fa6f21512"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc",
+      "baseline_sha256": null,
+      "modified_sha256": "93fb6e4cd5e46fec69c2a8864498c3132bb6240c61569f7cb35d1190fdba569c"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_tier1_shaders.h",
+      "baseline_sha256": null,
+      "modified_sha256": "602a7ce17b7d8cdf856d5492ed264c4da48df3a5582a913bdf66e1f5d042d0f3"
+    },
+    {
+      "path": "gpu/shim/bbport_overlay.cpp",
+      "baseline_sha256": "de7388d4c26347a8d44bddde4729f35ba48ac1b565afb0f402dae5b700788b8b",
+      "modified_sha256": "5773d708d0568452136e1bc7557f56b88c5a744276554236fcdc69efc58e13b3"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.cpp",
+      "baseline_sha256": "5fbee64ef796aeedd1de9d278a2017e34af0e9f14c0e2c321f02acfe2921beed",
+      "modified_sha256": "b802da01cf28aa9adbc623b208605c51492ba895553241b2f3ec0fba9695e69d"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.h",
+      "baseline_sha256": "b1cf67bb0a119d31852ea7e57a8faa9b0329d67a63545f794e01496147785dbb",
+      "modified_sha256": "03386e3ca1e2b32539c7f4b12471424677c4c77028ead9ac6addd043c79ebf63"
+    },
+    {
+      "path": "tests/test_directional_shadows.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "f77113918666c22bc4bdc18ae42d6e399a340aae0509c71363a4e1127f92bc55"
+    },
+    {
+      "path": "tests/test_gtao_hq.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "142992f20177bb727047302643cfdd39dd3ee5b407698e2e43b03088021263ec"
+    },
+    {
+      "path": "tests/test_settings.cpp",
+      "baseline_sha256": "534635ce1167f4472780629c667a7ba2f1b4f8cfcae0ba4607c0f7d99fb036bb",
+      "modified_sha256": "ad30cd1e61e210c30e3a65f223c1691e943d16af243542c88c9902ae43157b46"
+    },
+    {
+      "path": "tests/test_ssr_geometry.py",
+      "baseline_sha256": null,
+      "modified_sha256": "910b7038033bb8e42a70bd7848395f95cd1379ddcf6e26a3d70bd2fbc392d452"
+    },
+    {
+      "path": "tests/test_ssr_intensity.py",
+      "baseline_sha256": null,
+      "modified_sha256": "cabcc818c85f2b219e2384963abcafbb0de140cc8b7cc2831a59e344412e40bc"
+    },
+    {
+      "path": "tests/test_tier1_effect_pipelines.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "837914c806839d853763e1f395744ea687d63f558b6e250f836aed17579790c2"
+    }
+  ]
+}
