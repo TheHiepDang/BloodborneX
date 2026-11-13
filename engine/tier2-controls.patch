@@ -1,0 +1,1868 @@
+diff --git a/gpu/CMakeLists.txt b/gpu/CMakeLists.txt
+--- a/gpu/CMakeLists.txt
++++ b/gpu/CMakeLists.txt
+@@ -214,6 +214,7 @@
+ add_host_shader(froyok_bloom.comp froyok_bloom_downsample_comp FIRST=0)
+ add_host_shader(froyok_bloom.comp froyok_bloom_first_comp FIRST=1)
+ add_host_shader(froyok_bloom.comp froyok_bloom_upsample_comp UPSAMPLE=1 FIRST=0)
++add_host_shader(local_light_test.comp local_light_test_comp)
+ add_host_shader(native_motion_blur.frag native_motion_blur_frag)
+ add_host_shader(native_motion_blur_test.comp native_motion_blur_test_comp)
+ add_host_shader(sky_seam.comp sky_seam_comp)
+@@ -580,3 +581,11 @@
+     target_link_libraries(tier2-post-test PRIVATE winmm ws2_32 psapi onecore)
+ endif()
+ target_compile_options(tier2-post-test PRIVATE -UNDEBUG -Wno-deprecated-declarations -Wno-missing-field-initializers)
++
++add_executable(bloom-lifecycle-test EXCLUDE_FROM_ALL ../tests/test_bloom_lifecycle.cpp)
++target_compile_options(bloom-lifecycle-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
++add_executable(live-local-light-test EXCLUDE_FROM_ALL ../tests/test_live_local_light.cpp)
++target_include_directories(live-local-light-test PRIVATE ${SHADER_INCLUDE})
++target_compile_options(live-local-light-test PRIVATE -UNDEBUG -Wall -Wextra -Werror -Wno-missing-field-initializers)
++target_link_libraries(live-local-light-test PRIVATE Vulkan::Vulkan)
++add_dependencies(live-local-light-test host_shaders)
+diff --git a/gpu/shadps4/video_core/host_shaders/local_light_test.comp b/gpu/shadps4/video_core/host_shaders/local_light_test.comp
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/host_shaders/local_light_test.comp
+@@ -0,0 +1,13 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#version 450
++layout(local_size_x=1) in;
++layout(push_constant) uniform NativePush {
++    float x; float y; float sx; float sy;
++    uvec4 ud0; uvec4 ud1; uvec4 ud2; uvec4 ud3;
++    uvec4 bo0; uvec4 bo1; uvec2 bo2; uint motion; uint scene_size;
++} p;
++layout(set=0,binding=2,std430) buffer Result {float values[];} result;
++void main() {
++    result.values[0]=max(0.0,1.0/(float(p.scene_size)*0.0001+0.2222)-0.3333)*0.1111;
++    result.values[1]=0.4444;
++}
+diff --git a/gpu/shadps4/video_core/host_shaders/native_motion_blur.frag b/gpu/shadps4/video_core/host_shaders/native_motion_blur.frag
+--- a/gpu/shadps4/video_core/host_shaders/native_motion_blur.frag
++++ b/gpu/shadps4/video_core/host_shaders/native_motion_blur.frag
+@@ -8,7 +8,7 @@
+ layout(set = 0, binding = 2) uniform texture2D velocity_image;
+ layout(set = 0, binding = 3) uniform sampler color_sampler;
+ layout(set = 0, binding = 4) uniform sampler velocity_sampler;
+-layout(push_constant) uniform Push { layout(offset = 80) uint buffer_offset; } pc;
++layout(push_constant) uniform Push { layout(offset = 80) uint buffer_offset; layout(offset = 128) float strength; } pc;
+ layout(location = 0) in vec4 uv;
+ layout(location = 0) out vec4 color;
+ 
+@@ -22,4 +22,6 @@
+ ivec2 blurSize() { return textureSize(sampler2D(color_image, color_sampler), 0); }
+ #include "native_motion_blur.glsl"
+ 
+-void main() { color = nativeMotionBlur(uv.xy, true); }
++void main() {
++    color=nativeMotionBlurStrength(uv.xy,true,pc.strength);
++}
+diff --git a/gpu/shadps4/video_core/host_shaders/native_motion_blur.glsl b/gpu/shadps4/video_core/host_shaders/native_motion_blur.glsl
+--- a/gpu/shadps4/video_core/host_shaders/native_motion_blur.glsl
++++ b/gpu/shadps4/video_core/host_shaders/native_motion_blur.glsl
+@@ -40,3 +40,11 @@
+                      blurConstant(638), blurConstant(639));
+     return total * (gain / count);
+ }
++
++vec4 nativeMotionBlurStrength(vec2 uv,bool quality,float strength) {
++    if(strength>=1.0) return nativeMotionBlur(uv,quality);
++    vec2 motion=decodeMotion(blurVelocity(uv));
++    if(abs(motion.x)+abs(motion.y)<blurConstant(754)) return blurColor(uv);
++    vec4 gain=vec4(blurConstant(636),blurConstant(637),blurConstant(638),blurConstant(639));
++    return mix(blurColor(uv)*gain,nativeMotionBlur(uv,quality),clamp(strength,0.0,1.0));
++}
+diff --git a/gpu/shadps4/video_core/host_shaders/native_motion_blur_test.comp b/gpu/shadps4/video_core/host_shaders/native_motion_blur_test.comp
+--- a/gpu/shadps4/video_core/host_shaders/native_motion_blur_test.comp
++++ b/gpu/shadps4/video_core/host_shaders/native_motion_blur_test.comp
+@@ -7,7 +7,7 @@
+ layout(binding = 1) uniform sampler2D color_image;
+ layout(binding = 2) uniform sampler2D velocity_image;
+ layout(binding = 3, rgba32f) uniform writeonly image2D output_image;
+-layout(push_constant) uniform Push { uint high_quality; } pc;
++layout(push_constant) uniform Push { uint high_quality; float strength; } pc;
+ 
+ float blurConstant(int index) { return constants.data[index]; }
+ vec4 blurColor(vec2 p) { return textureLod(color_image, p, 0.0); }
+@@ -18,6 +18,6 @@
+ void main() {
+     ivec2 p = ivec2(gl_GlobalInvocationID.xy), size = imageSize(output_image);
+     if (any(greaterThanEqual(p, size))) return;
+-    imageStore(output_image, p, nativeMotionBlur((vec2(p) + 0.5) / vec2(size),
+-                                               pc.high_quality != 0));
++    imageStore(output_image, p, nativeMotionBlurStrength((vec2(p) + 0.5) / vec2(size),
++                                               pc.high_quality != 0,pc.strength));
+ }
+diff --git a/gpu/shadps4/video_core/host_shaders/sky_zenith.comp b/gpu/shadps4/video_core/host_shaders/sky_zenith.comp
+--- a/gpu/shadps4/video_core/host_shaders/sky_zenith.comp
++++ b/gpu/shadps4/video_core/host_shaders/sky_zenith.comp
+@@ -9,7 +9,7 @@
+ // filtered with. args: per-mip indirect dispatch sizes of the filter passes (zero when the
+ // cached result is still valid).
+ layout(set = 0, binding = 4, std430) buffer Validation { uint verified; uint applied; uint args[36]; };
+-layout(push_constant) uniform Params { uint level; uint count; uint force; } p;
++layout(push_constant) uniform Params { uint level; uint count; uint force; float strength; } p;
+ 
+ vec3 encoded(vec3 linear_rgb) {
+     return mix(12.92 * linear_rgb,
+@@ -89,7 +89,7 @@
+ #ifdef HORIZONTAL
+         value = sum / weights;
+ #else
+-        value = mix(original.rgb, sum / weights, amount);
++        value = mix(original.rgb, sum / weights, amount*clamp(p.strength,0.0,1.0));
+ #endif
+     }
+ #ifdef HORIZONTAL
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/bloom_frame_state.h b/gpu/shadps4/video_core/renderer_vulkan/bloom_frame_state.h
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/renderer_vulkan/bloom_frame_state.h
+@@ -0,0 +1,23 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#pragma once
++namespace Vulkan {
++class BloomFrameState {
++    bool enabled=false,ready=false;
++    int status=0;
++public:
++    void SetEnabled(bool value) {
++        if(value==enabled)return;
++        enabled=value;ready=false;status=enabled?1:0;
++    }
++    bool Enabled() const {return enabled;}
++    bool Ready() const {return enabled && ready;}
++    void Generated() {ready=enabled;}
++    void Discard() {ready=false;}
++    void Unsupported() {ready=false;status=enabled?3:0;}
++    bool Consume(bool compatible) {
++        if(!Ready())return false;
++        ready=false;status=compatible?2:3;return compatible;
++    }
++    int Status() const {return status;}
++};
++}
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.cpp
+@@ -186,12 +186,12 @@
+         .debug = debug,
+         .contact_on = use_contact ? 1u : 0u,
+         .pcss_on = use_pcss ? 1u : 0u,
+-        .light_tan = light_tan,
++        .light_tan = light_tan*std::clamp(BbSettings::Get().graphics_pcss_softness.load(),0.0f,2.0f),
+         .max_penumbra_m = max_penumbra_m,
+         .min_penumbra_m = min_penumbra_m,
+         .bias_m = bias_m,
+         .filter_on = use_filter ? 1u : 0u,
+-        .cascade_blend = BbEngine::Graphics::DirectionalShadowBlend(),
++        .cascade_blend = BbEngine::Graphics::DirectionalShadowBlend()*std::clamp(BbSettings::Get().graphics_shadow_filter_strength.load(),0.0f,1.0f),
+     };
+     const auto in = pending_inputs;
+     const bool filter_on = use_filter;
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.cpp
+@@ -157,7 +157,7 @@
+ 
+ bool DepthOfField::Enabled() const {
+     static_assert(std::string_view{BbSettings::Effects[1].key} == "effect_dof");
+-    return enabled && BbSettings::Get().startup_effects[1];
++    return enabled && BbSettings::Get().graphics_advanced_enabled && BbSettings::Get().startup_effects[1];
+ }
+ 
+ void DepthOfField::Reset() {
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_froyok_bloom.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_froyok_bloom.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_froyok_bloom.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_froyok_bloom.cpp
+@@ -72,9 +72,11 @@
+     return oldest->view;
+ }
+ 
+-void FroyokBloom::OnFrameEnd() {
+-    ready = false;
+-}
++void FroyokBloom::SetEnabled(bool value) {
++    frame.SetEnabled(value);
++    BbSettings::Get().graphics_froyok_status=frame.Status();
++}
++void FroyokBloom::OnFrameEnd() { frame.Discard(); }
+ 
+ bool FroyokBloom::Ready() {
+     if (tried) {
+@@ -118,8 +120,10 @@
+ 
+ FroyokBloom::Source FroyokBloom::Access(VideoCore::ImageId id) {
+     auto& image = texture_cache.GetImage(id);
+-    if (image.info.pixel_format != vk::Format::eR16G16B16A16Sfloat ||
+-        image.info.resources.levels != 1 || image.info.resources.layers != 1) {
++    const auto format=image.info.pixel_format;
++    const bool hdr=format==vk::Format::eR16G16B16A16Sfloat ||
++        format==vk::Format::eR32G32B32A32Sfloat || format==vk::Format::eB10G11R11UfloatPack32;
++    if (!hdr || image.info.resources.levels<1 || image.info.resources.layers!=1) {
+         return {};
+     }
+     if (scene_targets.Reduced() && scene_targets.EligibleScene(image)) {
+@@ -223,14 +227,15 @@
+ }
+ 
+ void FroyokBloom::Generate(VideoCore::ImageId id) {
+-    ready = false;
+-    if (!id || !enabled ||
+-        !Ready()) {
+-        return;
++    frame.Discard();
++    if (!id || !frame.Enabled()) return;
++    if(!Ready()) {
++        frame.Unsupported(); BbSettings::Get().graphics_froyok_status=frame.Status(); return;
+     }
+     scheduler.EndRendering();
+     const Source source = Access(id);
+     if (!source.view || !source.width || !source.height || !EnsureImages(source.width, source.height)) {
++        frame.Unsupported(); BbSettings::Get().graphics_froyok_status=frame.Status();
+         if (!reported) {
+             reported = true;
+             std::printf("Froyok bloom: unavailable for this HDR target; retaining Original Bloom\n");
+@@ -267,18 +272,22 @@
+                                      BbSettings::FroyokSpreadMax)};
+         run(2, push, *current.view, *previous.view, output);
+     }
+-    ready = true;
++    frame.Generated();
+ }
+ 
+ float FroyokBloom::Composite(const Shader::Info& fragment,
+                              std::span<vk::DescriptorImageInfo> image_infos) {
+     // image_infos holds the fragment stage's four images followed by their samplers.
+-    if (!ready || fragment.pgm_hash != Shader::Native::FroyokCompositeHash ||
++    if (!frame.Ready() || fragment.pgm_hash != Shader::Native::FroyokCompositeHash ||
+         !fragment.uses_froyok_bloom || fragment.images.size() != 4 || image_infos.size() < 4 ||
+         upsampled.empty()) {
++        if(frame.Enabled()) { frame.Unsupported(); BbSettings::Get().graphics_froyok_status=frame.Status(); }
+         return -1.0f;
+     }
+-    ready = false;
++    if(!frame.Consume(true)) return -1.0f;
++    if(BbSettings::Get().graphics_froyok_status!=2)
++        std::printf("Froyok bloom: active composite; amount and spread are live\n");
++    BbSettings::Get().graphics_froyok_status=frame.Status();
+     image_infos[2].imageView = *upsampled[0].view;
+     image_infos[2].imageLayout = vk::ImageLayout::eGeneral;
+     return std::clamp(BbSettings::Get().graphics_froyok_blend.load(std::memory_order_relaxed),
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_froyok_bloom.h b/gpu/shadps4/video_core/renderer_vulkan/vk_froyok_bloom.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_froyok_bloom.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_froyok_bloom.h
+@@ -2,6 +2,7 @@
+ #pragma once
+ 
+ #include <array>
++#include "video_core/renderer_vulkan/bloom_frame_state.h"
+ #include <span>
+ #include <vector>
+ 
+@@ -28,8 +29,8 @@
+     ~FroyokBloom();
+ 
+     void OnFrameEnd();
+-    void SetEnabled(bool value) { enabled=value; if(!enabled) ready=false; }
+-    bool enabled=false;
++    void SetEnabled(bool value);
++    BloomFrameState frame;
+     void Generate(VideoCore::ImageId source);
+     float Composite(const Shader::Info& fragment,
+                     std::span<vk::DescriptorImageInfo> image_infos);
+@@ -76,7 +77,7 @@
+     vk::UniqueSampler downsample_sampler, upsample_sampler;
+     std::vector<Image> downsampled, upsampled;
+     u32 width{}, height{};
+-    bool tried{}, failed{}, ready{}, reported{};
++    bool tried{}, failed{}, reported{};
+     std::array<ViewEntry, 4> view_cache{};
+     u64 view_uses = 0;
+ };
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_graphics_pipeline.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+@@ -25,6 +25,7 @@
+ #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+ #include "video_core/renderer_vulkan/pipeline_compile_queue.h"
+ #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
++#include "video_core/renderer_vulkan/vk_local_falloff.h"
+ #include "video_core/renderer_vulkan/vk_instance.h"
+ #include "video_core/renderer_vulkan/vk_object_motion.h"
+ #include "video_core/renderer_vulkan/vk_scheduler.h"
+@@ -158,12 +159,14 @@
+         return info && info->uses_tone_curve;
+     });
+     uses_froyok_bloom=std::ranges::any_of(stages,[](const Shader::Info* info){ return info && info->uses_froyok_bloom; });
++    const auto* light_ps=stages[u32(Shader::SwStage::Fragment)];
++    uses_local_light_tuning=light_ps && !uses_tone_curve && !uses_froyok_bloom && (LocalFalloff::Target(u32(light_ps->pgm_hash)) || light_ps->pgm_hash==0x29e06868);
+     const vk::PushConstantRange push_constants = {
+         .stageFlags = AllGraphicsStageBits,
+         .offset = 0,
+         .size = u32(uses_froyok_bloom ? 160U : uses_tone_curve ? Shader::Native::ToneCurvePushOffset +
+                                           sizeof(Shader::Native::ToneCurvePush)
+-                                    : sizeof(Shader::PushData)),
++                                    : uses_local_light_tuning ? 144U : sizeof(Shader::PushData)),
+     };
+ 
+     std::array<vk::DescriptorSetLayout, 2> set_layouts{*desc_layout, {}};
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_local_falloff.h b/gpu/shadps4/video_core/renderer_vulkan/vk_local_falloff.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_local_falloff.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_local_falloff.h
+@@ -2,6 +2,7 @@
+ #pragma once
+ 
+ #include <bit>
++#include <array>
+ #include <cmath>
+ #include <cstddef>
+ #include <cstdint>
+@@ -18,6 +19,7 @@
+ struct Stats {
+     uint32_t standard = 0, special = 0;
+     bool Changed() const { return standard || special; }
++    std::array<uint32_t,3> parameters{};
+ };
+ 
+ inline bool Target(uint32_t hash) {
+@@ -156,6 +158,7 @@
+     uint32_t next = spv[3];
+     core = std::isfinite(core) && core > 0.0f ? core : 0.0f;
+     const uint32_t energy = next++, core_squared = next++, edge = next++;
++    stats.parameters={energy,core_squared,edge};
+     const uint32_t constant[] = {
+         (4u << 16) | 43, f32, energy, std::bit_cast<uint32_t>(intensity * EnergyScale(core)),
+         (4u << 16) | 43, f32, core_squared, std::bit_cast<uint32_t>(core * core),
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_local_light_push.h b/gpu/shadps4/video_core/renderer_vulkan/vk_local_light_push.h
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_local_light_push.h
+@@ -0,0 +1,72 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#pragma once
++#include <array>
++#include <vector>
++#include <cstdint>
++
++namespace Vulkan::LocalLightPush {
++// Replace only constants inserted by our guarded light patches. Extend the existing
++// game push block at 128 without changing any of its original members/bindings.
++inline bool Convert(std::vector<uint32_t>& spv,std::array<uint32_t,4> ids) {
++    uint32_t push=0,ptr=0,block=0,f32=0,u32=0,vec4=0;
++    for(size_t i=5;i<spv.size();) {
++        const auto n=spv[i]>>16,op=spv[i]&65535;
++        if(!n || i+n>spv.size()) return false;
++        if(op==59 && n>=4 && spv[i+3]==9) { if(push) return false;push=spv[i+2];ptr=spv[i+1]; }
++        if(op==22 && n==3 && spv[i+2]==32) f32=spv[i+1];
++        if(op==21 && n==4 && spv[i+2]==32 && spv[i+3]==0) u32=spv[i+1];
++        i+=n;
++    }
++    if(!push || !f32 || !u32) return false;
++    for(size_t i=5;i<spv.size();i+=spv[i]>>16) {
++        const auto n=spv[i]>>16,op=spv[i]&65535;
++        if(op==32 && spv[i+1]==ptr && spv[i+2]==9) block=spv[i+3];
++        if(op==23 && n==4 && spv[i+2]==f32 && spv[i+3]==4) vec4=spv[i+1];
++    }
++    uint32_t members=0;
++    for(size_t i=5;i<spv.size();i+=spv[i]>>16)
++        if((spv[i]&65535)==30 && spv[i+1]==block) members=(spv[i]>>16)-2;
++    // The existing 128-byte native game block has thirteen members. Decline other ABIs.
++    if(!block || members!=13) return false;
++    uint32_t next=spv[3],pfloat=next++,member=next++;
++    std::array<uint32_t,4> component{}; for(auto& c:component)c=next++;
++    std::vector<uint32_t> globals,vector_type;
++    const auto emit=[&](std::vector<uint32_t>& into,uint32_t op,std::initializer_list<uint32_t> args) {
++        into.push_back((uint32_t(args.size()+1)<<16)|op);into.insert(into.end(),args);
++    };
++    if(!vec4) {vec4=next++;emit(vector_type,23,{vec4,f32,4});}
++    emit(globals,32,{pfloat,9,f32}); emit(globals,43,{u32,member,members});
++    for(uint32_t c=0;c<4;++c)emit(globals,43,{u32,component[c],c});
++    std::vector<uint32_t> result(spv.begin(),spv.begin()+5);
++    bool annotated=false,declared=false,loaded=false,in_function=false,entry=false;
++    size_t removed=0;
++    for(size_t i=5;i<spv.size();) {
++        const auto n=spv[i]>>16,op=spv[i]&65535;
++        if(!annotated && op>=19 && op<=39) {
++            emit(result,72,{block,members,35,128});annotated=true;
++        }
++        if(op==54 && !declared) {result.insert(result.end(),globals.begin(),globals.end());declared=true;in_function=true;}
++        if(op==248) entry=true;
++        if(in_function && entry && !loaded && op!=54 && op!=55 && op!=248 && op!=59 && op!=8 && op!=317) {
++            for(uint32_t c=0;c<4;++c)if(ids[c]) {
++                const auto address=next++;
++                emit(result,65,{pfloat,address,push,member,component[c]});
++                emit(result,61,{f32,ids[c],address});
++            }
++            loaded=true;
++        }
++        bool remove=false;
++        if(op==43 && n==4) for(auto id:ids)if(id && spv[i+2]==id)remove=true;
++        if(remove) ++removed;
++        else if(op==30 && spv[i+1]==block) {
++            result.insert(result.end(),vector_type.begin(),vector_type.end());
++            result.push_back(((n+1)<<16)|op);
++            result.insert(result.end(),spv.begin()+i+1,spv.begin()+i+n);result.push_back(vec4);
++        } else result.insert(result.end(),spv.begin()+i,spv.begin()+i+n);
++        i+=n;
++    }
++    size_t requested=0;for(auto id:ids) requested+=id!=0;
++    if(!loaded || !annotated || !declared || removed!=requested) return false;
++    result[3]=next;spv=std::move(result);return true;
++}
++} // namespace Vulkan::LocalLightPush
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_common.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_common.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_common.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_common.cpp
+@@ -13,6 +13,8 @@
+ #include <boost/container/static_vector.hpp>
+ 
+ #include "bbport_settings.h"
++#include "video_core/renderer_vulkan/vk_local_falloff.h"
++#include "video_core/renderer_vulkan/vk_ggx_lobes.h"
+ #include "shader_recompiler/native/tone_curve.h"
+ #include "shader_recompiler/resource.h"
+ #include "video_core/renderer_vulkan/pipeline_compile_queue.h"
+@@ -136,7 +138,7 @@
+     const auto& settings = BbSettings::Get();
+     if (!Shader::Native::ToneCurveEnabled()) {
+         // Reuse the existing 16-byte push ABI. Original mode executes the original branch.
+-        return {float(settings.graphics_tonemapper.load()),settings.graphics_tonemap_exposure.load(),0,0};
++        return {float(settings.graphics_advanced_enabled ? settings.graphics_tonemapper.load() : 0),settings.graphics_tonemap_exposure.load(),0,0};
+     }
+     const float paper = std::clamp(settings.hdr_paper_white.load(std::memory_order_relaxed),
+                                    BbSettings::HdrPaperWhiteMin, BbSettings::HdrPaperWhiteMax);
+@@ -172,6 +174,18 @@
+     if(uses_froyok_bloom) {
+         const std::array<float,4> bloom{froyok_blend,0,0,0};
+         scheduler.Record([layout,stage_flags,bloom](vk::CommandBuffer cmd){ cmd.pushConstants(layout,stage_flags,144u,sizeof(bloom),bloom.data()); });
++    }
++    if(uses_local_light_tuning) {
++        const auto& s=BbSettings::Get();
++        const float core=std::clamp(s.graphics_light_core.load(),0.01f,1.0f);
++        const float intensity=std::clamp(s.graphics_light_intensity.load(),0.1f,4.0f);
++        const float sharpness=std::clamp(s.graphics_light_sharpness.load(),1.0f,8.0f);
++        const bool motion=GetStage(Shader::SwStage::Fragment).pgm_hash==0x29e06868;
++        const std::array<float,4> light{motion ? std::clamp(s.graphics_motion_blur_strength.load(),0.0f,1.0f) : intensity*LocalFalloff::EnergyScale(core),core*core,
++            1.0f/(1.0f+core*core),GgxLobes::SharpnessCap/sharpness};
++        scheduler.Record([layout,stage_flags,light](vk::CommandBuffer cmd){
++            cmd.pushConstants(layout,stage_flags,128u,sizeof(light),light.data());
++        });
+     }
+     // Bind descriptor set.
+     if (set_writes.empty()) {
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_common.h b/gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_common.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_common.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_common.h
+@@ -143,6 +143,7 @@
+     /// bbport: the fragment shader reads Shader::Native::ToneCurvePush after the push data.
+     bool uses_tone_curve{};
+     bool uses_froyok_bloom{};
++    bool uses_local_light_tuning{};
+ public:
+     mutable float froyok_blend=-1.0f;
+ protected:
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp
+@@ -2181,6 +2181,9 @@
+     Tier1AfterDraw(pipeline);
+     if (spatial_ao->Enabled()) HqAoAfterDraw(pipeline, state);
+     if (BbSettings::Get().startup_dof_mode == 1) DepthOfFieldAfterDraw(pipeline,state);
++    // Retire the current bloom result after the recorded display draw, not before binding it.
++    if(regs.color_buffers[0] && FrameCapture::IsDisplayBuffer(regs.color_buffers[0].Address()))
++        froyok_bloom->OnFrameEnd();
+     if (FrameCapture::Active()) {
+         const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+         FrameCapture::Draw(vs_info.pgm_hash, ps ? ps->pgm_hash : 0, num_indices, num_instances);
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_sky_zenith.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_sky_zenith.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_sky_zenith.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_sky_zenith.cpp
+@@ -1,5 +1,6 @@
+ // SPDX-License-Identifier: GPL-3.0-or-later
+ #include "video_core/renderer_vulkan/vk_sky_zenith.h"
++#include "bbport_settings.h"
+ #include <algorithm>
+ #include <cstdio>
+ #include <cstdlib>
+@@ -55,7 +56,7 @@
+     set = OptionalSkyResource(device.createDescriptorSetLayoutUnique({
+         .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
+         .bindingCount = u32(bindings.size()), .pBindings = bindings.data()}));
+-    const vk::PushConstantRange push{vk::ShaderStageFlagBits::eCompute, 0, 12};
++    const vk::PushConstantRange push{vk::ShaderStageFlagBits::eCompute, 0, 16};
+     layout = OptionalSkyResource(device.createPipelineLayoutUnique({
+         .setLayoutCount = 1, .pSetLayouts = &*set,
+         .pushConstantRangeCount = 1, .pPushConstantRanges = &push}));
+@@ -109,7 +110,9 @@
+                               vk::DescriptorBufferInfo geometry, u32 count) {
+     if (!Ready() || !source.imageView || !geometry.buffer) return {};
+     source.sampler = *sampler;
+-    const u32 force = cached && key.stable && key == cached_key ? 0u : 1u;
++    const float strength=std::clamp(BbSettings::Get().graphics_sky_smoothing_strength.load(),0.0f,1.0f);
++    const u32 force = cached && key.stable && key == cached_key && strength==cached_strength ? 0u : 1u;
++    cached_strength=strength;
+     cached = key.stable;
+     cached_key = key;
+     scheduler.EndRendering();
+@@ -136,8 +139,8 @@
+             vk::DescriptorImageInfo{{}, *result_views[mip], vk::ImageLayout::eGeneral}};
+         const std::array<vk::DescriptorBufferInfo, 2> buffers{
+             geometry, vk::DescriptorBufferInfo{validation->Handle(), 0, ValidationBytes}};
+-        struct Params { u32 mip, count, force; };
+-        const Params params{mip, count, force};
++        struct Params { u32 mip, count, force; float strength; };
++        const Params params{mip, count, force, strength};
+         scheduler.Record([images, buffers, params, pass_index, args = validation->Handle(),
+                           pipe = *pipelines[pass_index], layout = *layout](vk::CommandBuffer cmd) {
+             EffectPass::MemoryBarrier(
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_sky_zenith.h b/gpu/shadps4/video_core/renderer_vulkan/vk_sky_zenith.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_sky_zenith.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_sky_zenith.h
+@@ -30,6 +30,7 @@
+     Scheduler& scheduler;
+     bool enabled = false, initialized = false, cached = false;
+     SourceKey cached_key;
++    float cached_strength=-1.0f;
+     vk::UniqueDescriptorSetLayout set;
+     vk::UniquePipelineLayout layout;
+     std::array<vk::UniquePipeline, 3> pipelines;
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc b/gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc
+@@ -30,8 +30,20 @@
+ 
+ void Rasterizer::Tier1BeforeBind(const GraphicsPipeline* pipeline) {
+     pipeline->froyok_blend=-1.0f;
+-    if(const auto* ps=pipeline->GetStages()[u32(Shader::SwStage::Fragment)]; ps && ps->uses_froyok_bloom)
++    if(const auto* ps=pipeline->GetStages()[u32(Shader::SwStage::Fragment)]; ps && ps->uses_froyok_bloom &&
++       ps->pgm_hash==0x5c02eaf8 && ps->images.size()==4 && image_infos.size()>=4) {
++        // In this verified composite, texture 0 supplies the scene and texture 2 the bloom.
++        // The NR/upscale path may omit native DoF recombine entirely. Generate from the
++        // actual postprocessed scene consumed here, after DoF when that pass is present.
++        const auto source=ps->images[0].GetSharp(*ps).Address();
++        for(const auto id:bound_images) if(id && id!=cb_descs[0].first &&
++                texture_cache.GetImage(id).info.guest_address==source) {
++            froyok_bloom->Generate(id);
++            if(froyok_bloom->frame.Ready()) image_infos[0].imageLayout=vk::ImageLayout::eGeneral;
++            break;
++        }
+         pipeline->froyok_blend=froyok_bloom->Composite(*ps,image_infos);
++    }
+     if(const auto* ps=pipeline->GetStages()[u32(Shader::SwStage::Fragment)]; ps && ps->pgm_hash==Gtao::SsaoHash)
+         push_data.motion_param=pipeline_cache.tier2_variants.SmoothNormals()?1u:0u;
+     const auto& settings = BbSettings::Get();
+@@ -247,9 +259,8 @@
+     const auto changed=tier1_live.Latch({settings.graphics_ssgi.load(),
+         settings.graphics_contact_shadows.load(),settings.graphics_volumetric_light.load(),
+         settings.graphics_point_fog.load(),settings.graphics_point_shadows.load()});
+-    froyok_bloom->OnFrameEnd();
+     const bool changed_t2=pipeline_cache.tier2_variants.Latch();
+-    froyok_bloom->SetEnabled(settings.graphics_bloom_quality==1);
++    froyok_bloom->SetEnabled(settings.graphics_advanced_enabled && settings.graphics_bloom_quality==1);
+     ssgi->SetSmoothNormals(pipeline_cache.tier2_variants.SmoothNormals());
+     sky_seam->SetEnabled(pipeline_cache.tier2_variants.SkySeam());
+     sky_zenith->SetEnabled(pipeline_cache.tier2_variants.SkySeam() && pipeline_cache.tier2_variants.SkyZenith());
+@@ -312,7 +323,6 @@
+                                   ps_info->images[0].GetSharp(*ps_info).Address(),
+                                   ps_info->images[1].GetSharp(*ps_info).Address(), image_infos[0],
+                                   constants, offset);
+-        froyok_bloom->Generate(cb_descs[0].first);
+     }
+ }
+ 
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_tier2_variants.h b/gpu/shadps4/video_core/renderer_vulkan/vk_tier2_variants.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_tier2_variants.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_tier2_variants.h
+@@ -9,6 +9,7 @@
+ #include "vk_ggx_patch.h"
+ #include "vk_ggx_lobes.h"
+ #include "vk_local_falloff.h"
++#include "vk_local_light_push.h"
+ #include "vk_pom_patch.h"
+ #include "shader_recompiler/info.h"
+ #include "shader_recompiler/profile.h"
+@@ -27,6 +28,7 @@
+     std::map<VkShaderModule,Record> records;
+     std::set<u64> hashes;
+     u32 active{};
++    std::atomic<bool> selecting{false};
+ public:
+     // The renderer calls this only at a display boundary. Scalars baked by upstream stay startup-only.
+     bool Latch() {
+@@ -36,13 +38,15 @@
+             (u32(s.graphics_env_tails.load())<<4) | (u32(s.graphics_local_falloff.load())<<5) |
+             (u32(s.graphics_pom.load())<<6) | (u32(s.graphics_motion_blur_quality.load())<<7) |
+             (u32(s.graphics_smooth_normals.load())<<8) | (u32(s.graphics_sky_seam.load())<<9) |
+-            (u32(s.graphics_sky_zenith.load())<<10) | (u32(s.graphics_bloom_quality.load())<<11) | (u32(s.startup_light_sharpness!=1.0f)<<12) | (u32(s.graphics_auto_exposure.load())<<13) | (u32(s.graphics_native_sss.load())<<14);
+-        const bool changed=bits!=active; active=bits; return changed;
++            (u32(s.graphics_sky_zenith.load())<<10) | (u32(s.graphics_bloom_quality.load())<<11) | (u32(s.graphics_light_sharpness.load()!=1.0f)<<12) | (u32(s.graphics_auto_exposure.load())<<13) | (u32(s.graphics_native_sss.load())<<14);
++        const u32 gated=s.graphics_advanced_enabled ? bits : 0u;
++        const bool changed=gated!=active; active=gated; selecting.store((active&0x10ff)!=0,std::memory_order_release); return changed;
+     }
+     bool SmoothNormals() const { return active & 256; }
+     bool SkySeam() const { return active & 512; }
+     bool SkyZenith() const { return active & 1024; }
+     bool Contains(u64 hash) {
++        if(!selecting.load(std::memory_order_acquire)) return false;
+         std::scoped_lock lock(mutex); return hashes.contains(hash);
+     }
+     void Remember(vk::ShaderModule base,const Shader::Info& info,const Shader::Profile& profile,
+@@ -78,9 +82,15 @@
+         Ggx::Patch(r.hash,true,(bits&3)!=0,spv,(bits&3)==2);
+         GgxLobes::Patch(spv,{bool(bits&4),bool(bits&8),bool(bits&16)});
+         if(LocalFalloff::Target(u32(r.hash))) {
+-            LocalFalloff::Patch(spv,u32(r.hash),bits&32,s.startup_light_intensity,s.startup_light_core);
+-            // This scalar modifies the light lobe, independent of inverse-square enablement.
+-            GgxLobes::ScaleLightSharpness(spv,s.startup_light_sharpness);
++            const auto static_spv=spv;
++            const auto falloff=LocalFalloff::Patch(spv,u32(r.hash),bits&32,1.0f,LocalFalloff::DefaultCore);
++            std::array<u32,4> live{falloff.parameters[0],falloff.parameters[1],falloff.parameters[2],0};
++            const auto sharp_id=spv[3];
++            if(GgxLobes::ScaleLightSharpness(spv,2.0f)) live[3]=sharp_id;
++            if((live[0] || live[3]) && !LocalLightPush::Convert(spv,live)) {
++                spv=static_spv;
++                std::printf("Advanced lights: unsupported push layout for %08x; original light coefficients retained\n",u32(r.hash));
++            }
+         }
+         if(bits&64) Pom::PatchPom(r.hash,true,spv);
+         if((bits&128) && r.hash==0x29e06868 && r.motion_fits) {
+diff --git a/gpu/shim/bbport_custom_presets.h b/gpu/shim/bbport_custom_presets.h
+--- a/gpu/shim/bbport_custom_presets.h
++++ b/gpu/shim/bbport_custom_presets.h
+@@ -25,5 +25,6 @@
+ bool WritePreset(const std::filesystem::path& path, const PresetDocument& document, bool overwrite, std::string& error);
+ bool ReadPreset(const std::filesystem::path& path, PresetDocument& document, std::string& error);
+ bool SaveCustomPreset(const PresetDocument& document, std::string& error);
++bool OverwriteCustomPreset(const std::filesystem::path& path, const PresetDocument& document, std::string& error);
+ bool DeleteCustomPreset(const std::filesystem::path& path, std::string& error);
+ }
+diff --git a/gpu/shim/bbport_custom_presets.inc b/gpu/shim/bbport_custom_presets.inc
+--- a/gpu/shim/bbport_custom_presets.inc
++++ b/gpu/shim/bbport_custom_presets.inc
+@@ -133,6 +133,17 @@
+     } catch (const std::exception& e) {error=e.what();}
+     return presets;
+ }
++bool OverwriteCustomPreset(const std::filesystem::path& path,const PresetDocument& document,std::string& error) {
++    try {
++        // Only existing owned library entries, never exports, INIs or immutable provided profiles.
++        if(path.extension()!=".bbxpreset" || std::filesystem::is_symlink(path) || !std::filesystem::is_regular_file(path) ||
++           std::filesystem::canonical(path.parent_path())!=std::filesystem::canonical(CustomPresetDirectory())) {
++            error="Only existing saved custom presets can be overwritten here.";return false;
++        }
++        PresetDocument previous;if(!ReadPreset(path,previous,error)) return false;
++        return WritePreset(path,document,true,error);
++    } catch(const std::exception& e) {error=e.what();return false;}
++}
+ bool DeleteCustomPreset(const std::filesystem::path& path, std::string& error) {
+     try {
+         if (path.extension()!=".bbxpreset" || std::filesystem::is_symlink(path) || std::filesystem::canonical(path.parent_path())!=std::filesystem::canonical(CustomPresetDirectory())) {error="Only saved user presets can be deleted here.";return false;}
+diff --git a/gpu/shim/bbport_custom_presets_ui.inc b/gpu/shim/bbport_custom_presets_ui.inc
+--- a/gpu/shim/bbport_custom_presets_ui.inc
++++ b/gpu/shim/bbport_custom_presets_ui.inc
+@@ -4,6 +4,17 @@
+ int custom_editor_request=0; // 1 Save current, 2 Export current
+ bool custom_import_browser=false;
+ std::optional<std::filesystem::path> custom_delete_request;
++std::optional<std::filesystem::path> custom_overwrite_editor_request;
++std::filesystem::path custom_save_target;
++std::filesystem::path custom_pending_overwrite_target;
++BbSettings::PresetDocument custom_pending_overwrite_document;
++void PresetControlHit(const std::string& key) {
++#ifdef BB_PRESET_UI_TEST
++    const auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();preset_test_hit_rects[key]=ImVec4(a.x,a.y,b.x,b.y);
++#else
++    (void)key;
++#endif
++}
+ std::unique_ptr<BbSettings::Values> preset_reference_values;
+ BbSettings::SettingList preset_reference_snapshot;
+ char custom_preset_name[129]="My preset";
+@@ -89,7 +100,8 @@
+     if (custom_presets_dirty) { custom_presets=BbSettings::ListCustomPresets(preset_ui_message); custom_presets_dirty=false; }
+     Section("My presets");
+     if (Shown("My presets")) {
+-        if (ImGui::Button("Save current...")) custom_editor_request=1;
++        if (ImGui::Button("Save current...")) { custom_overwrite_editor_request.reset();custom_editor_request=1; }
++        PresetControlHit("save_current_open");
+         ImGui::SameLine(); if (ImGui::Button("Export current...")) custom_editor_request=2;
+         ImGui::SameLine(); if (ImGui::Button("Load / Import...")) custom_import_browser=true;
+         if (ImGui::Button("Refresh presets")) custom_presets_dirty=true;
+@@ -98,6 +110,8 @@
+             const auto id=PathUtf8(preset.path); ImGui::PushID(id.c_str());
+             if (ImGui::Button("Apply")) { custom_apply_request=preset.document; custom_import_request=false; }
+             ImGui::SameLine(); ImGui::TextUnformatted(preset.document.name.c_str());
++            ImGui::SameLine(); if(ImGui::SmallButton("Overwrite")) {custom_overwrite_editor_request=preset.path;custom_editor_request=1;}
++            PresetControlHit("overwrite:"+id);
+             ImGui::SameLine(); if (ImGui::SmallButton("Delete")) custom_delete_request=preset.path;
+             ImGui::TextDisabled("%zu settings",preset.document.settings.size());
+             ImGui::PopID();
+@@ -129,13 +143,33 @@
+     if (ImGui::BeginPopupModal("Choose preset settings###preset_editor",nullptr,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse)) {
+         // Fixed header. The child below owns the only settings scrollbar.
+         ImGui::TextWrapped("Graphics settings are included by default. Click any option or group to include or exclude it. This is a read-only reference; your game settings will not change.");
++        std::string target_label="New custom preset";
++        for(const auto& saved:custom_presets) if(saved.path==custom_save_target) target_label=saved.document.name;
++        if(ImGui::BeginCombo("Save to",target_label.c_str())) {
++            if(ImGui::Selectable("New custom preset",custom_save_target.empty())) custom_save_target.clear();
++            for(const auto& saved:custom_presets) {
++                const auto id=PathUtf8(saved.path);ImGui::PushID(id.c_str());
++                if(ImGui::Selectable(saved.document.name.c_str(),saved.path==custom_save_target)) {
++                    custom_save_target=saved.path;SetPresetText(custom_preset_name,sizeof(custom_preset_name),saved.document.name);
++                }
++                PresetControlHit("target:"+id);ImGui::PopID();
++            }
++            ImGui::EndCombo();
++        }
++        PresetControlHit("save_target");
++        ImGui::TextDisabled("Provided RTX 3070 presets are read-only. Only custom presets can be replaced.");
+         ImGui::InputText("Preset name",custom_preset_name,sizeof(custom_preset_name));
+         const auto selected=SelectedPresetDocument();
+         ImGui::TextDisabled("%zu of %zu settings included",selected.settings.size(),preset_reference_snapshot.size());
+         ImGui::BeginDisabled(selected.settings.empty());
+-        if (ImGui::Button("Save")) {
+-            if (BbSettings::SaveCustomPreset(selected,preset_ui_message)) { custom_presets_dirty=true; preset_ui_message="Saved preset: "+selected.name; ImGui::CloseCurrentPopup(); }
+-        }
++        if (ImGui::Button(custom_save_target.empty()?"Save":"Overwrite preset")) {
++            if(!custom_save_target.empty()) {
++                // Freeze the selection at the confirmation boundary; no renderer/live-state writes.
++                custom_pending_overwrite_target=custom_save_target;custom_pending_overwrite_document=selected;
++                ImGui::OpenPopup("Overwrite custom preset?###custom_overwrite");
++            } else if (BbSettings::SaveCustomPreset(selected,preset_ui_message)) { custom_presets_dirty=true; preset_ui_message="Saved preset: "+selected.name; ImGui::CloseCurrentPopup(); }
++        }
++        PresetControlHit("save_preset");
+         ImGui::SameLine();
+         if (ImGui::Button("Export")) {
+             BbSettings::PresetDocument checked;
+@@ -143,6 +177,7 @@
+         }
+         ImGui::EndDisabled();
+         ImGui::SameLine(); if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
++        PresetControlHit("editor_cancel");
+         if (!preset_ui_message.empty()) ImGui::TextWrapped("%s",preset_ui_message.c_str());
+         ImGui::Separator();
+         if (ImGui::BeginChild("##reference_settings",ImVec2(0,0),ImGuiChildFlags_NavFlattened)) {
+@@ -185,6 +220,24 @@
+         }
+         ImGui::EndChild();
+         PresetFileBrowser(true);
++        bool close_editor=false;
++        if(ImGui::BeginPopupModal("Overwrite custom preset?###custom_overwrite",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
++            ImGui::TextUnformatted("Replace this saved custom preset with the selected current settings?");
++            BbSettings::PresetDocument existing;std::string why;
++            if(BbSettings::ReadPreset(custom_pending_overwrite_target,existing,why)) ImGui::TextUnformatted(existing.name.c_str());
++            ImGui::Text("%zu settings will be saved. Current game settings will not change.",custom_pending_overwrite_document.settings.size());
++            if(ImGui::Button("Yes, overwrite")) {
++                if(BbSettings::OverwriteCustomPreset(custom_pending_overwrite_target,custom_pending_overwrite_document,preset_ui_message)) {
++                    custom_presets_dirty=true;preset_ui_message="Overwritten preset: "+custom_pending_overwrite_document.name;
++                    ImGui::CloseCurrentPopup();close_editor=true;
++                }
++            }
++            PresetControlHit("confirm_overwrite");
++            ImGui::SameLine();if(ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
++            PresetControlHit("cancel_overwrite");
++            ImGui::SetItemDefaultFocus();ImGui::EndPopup();
++        }
++        if(close_editor) ImGui::CloseCurrentPopup();
+         ImGui::EndPopup();
+     }
+     ImGui::PopStyleVar(); ImGui::PopStyleColor();
+@@ -199,6 +252,16 @@
+         preset_reference_values->dlss_supported=true; preset_reference_values->fsr4_supported=true; preset_reference_values->fsr411_supported=true;
+         preset_included.clear();
+         for (const auto& [key,value]:preset_reference_snapshot) preset_included[key]=BbSettings::DefaultPresetGraphic(key);
++        custom_save_target=custom_overwrite_editor_request.value_or(std::filesystem::path{});
++        if(custom_overwrite_editor_request) {
++            BbSettings::PresetDocument existing;std::string why;
++            if(BbSettings::ReadPreset(*custom_overwrite_editor_request,existing,why)) {
++                SetPresetText(custom_preset_name,sizeof(custom_preset_name),existing.name);
++                for(auto& [key,included]:preset_included) included=false;
++                for(const auto& [key,value]:existing.settings) if(preset_included.contains(key)) preset_included[key]=true;
++            }
++        }
++        custom_overwrite_editor_request.reset();
+         preset_ui_message.clear();
+         ImGui::OpenPopup("Choose preset settings###preset_editor");
+         custom_editor_request=0;
+diff --git a/gpu/shim/bbport_overlay.cpp b/gpu/shim/bbport_overlay.cpp
+--- a/gpu/shim/bbport_overlay.cpp
++++ b/gpu/shim/bbport_overlay.cpp
+@@ -637,14 +637,10 @@
+     slider("graphics_contrast", "Contrast", "Контраст", s.graphics_contrast, 0.8f, 1.2f, "%.3f");
+     slider("graphics_saturation", "Saturation", "Насыщенность", s.graphics_saturation, 0.0f, 3.0f);
+     slider("graphics_hue", "Hue", "Оттенок", s.graphics_hue, -180.0f, 180.0f, "%.0f");
+-    slider("graphics_fog", "Fog", "Туман", s.graphics_fog, 0.0f, 3.0f);
+-    slider("graphics_bloom", "Bloom", nullptr, s.graphics_bloom, 0.0f, 3.0f);
+     if (const char* label = Item("Vignette", "Виньетка", "graphics_vignette")) {
+         Checkbox(label, s.graphics_vignette);
+         moved |= vignette != s.graphics_vignette;
+     }
+-    slider("graphics_ao_strength", "Ambient occlusion strength", "Сила затенения (AO)", s.graphics_ao_strength, 0.0f, 3.0f);
+-    slider("graphics_shadow_scale", "Shadow distance", "Дальность теней", s.graphics_shadow_scale, 0.5f, 4.0f);
+     if (moved && !s.graphics_controls) {
+         Store(s.graphics_controls, true, true);
+     }
+@@ -665,170 +661,212 @@
+ }
+ 
+ // Game effects switched by patches at start (restart required), and the model detail.
+-void EffectsSection() {
+-    auto& s = BbSettings::Get();
+-    Section("Game effects (restart required)", "Эффекты игры (после перезапуска)");
+-    if (const char* label = Item("Model detail", "Детализация моделей", "model_lod")) {
+-        const char* lods[] = {BbSettings::MenuText("Highest (-2)", "Максимальная (-2)"),
+-                              BbSettings::MenuText("Game default", "Как в игре"),
+-                              BbSettings::MenuText("Lower (1)", "Ниже (1)"),
+-                              BbSettings::MenuText("Lowest (2)", "Минимальная (2)")};
+-        static constexpr int lod_values[] = {-2, 0, 1, 2};
+-        int lod_index = 1;
+-        for (int i = 0; i < 4; ++i) {
+-            if (lod_values[i] == s.model_lod) lod_index = i;
+-        }
+-        if (ImGui::BeginCombo(label, lods[lod_index])) {
+-            for (int i = 0; i < 4; ++i) {
+-                if (ImGui::Selectable(lods[i], i == lod_index)) {
+-                    Store(s.model_lod, lod_values[i], true);
+-                }
+-            }
+-            ImGui::EndCombo();
+-        }
+-    }
+-    ImGui::SeparatorText("Tier 2 graphics");
+-    if (const char* label=Item("Smooth AO/GI normals (live)","Smooth AO/GI normals (live)","graphics_smooth_normals")) Checkbox(label,s.graphics_smooth_normals);
+-    if (const char* label=Item("Sky seam correction (live)","Sky seam correction (live)","graphics_sky_seam")) Checkbox(label,s.graphics_sky_seam);
+-    if (const char* label=Item("Sky zenith correction (requires seam) (live)","Sky zenith correction (requires seam) (live)","graphics_sky_zenith")) Checkbox(label,s.graphics_sky_zenith);
+-    if (const char* label=Item("POM cavity (live)","POM cavity (live)","graphics_pom")) Checkbox(label,s.graphics_pom);
+-    if (const char* label=Item("Motion blur quality (live)","Motion blur quality (live)","graphics_motion_blur_quality")) Checkbox(label,s.graphics_motion_blur_quality);
+-    if (const char* label=Item("Local-light GGX (live)","Local-light GGX (live)","graphics_local_ggx")) Checkbox(label,s.graphics_local_ggx);
+-    if (const char* label=Item("Specular antialiasing (live)","Specular antialiasing (live)","graphics_specular_aa")) Checkbox(label,s.graphics_specular_aa);
+-    if (const char* label=Item("Environment GGX tails (live)","Environment GGX tails (live)","graphics_env_tails")) Checkbox(label,s.graphics_env_tails);
+-    if (const char* label=Item("Inverse-square local lights (live)","Inverse-square local lights (live)","graphics_local_falloff")) Checkbox(label,s.graphics_local_falloff);
+-    if (const char* label=Item("Native auto exposure (live)","Native auto exposure (live)","graphics_auto_exposure")) Checkbox(label,s.graphics_auto_exposure);
+-    if (const char* label=Item("Native skin SSS (live)","Native skin SSS (live)","graphics_native_sss")) Checkbox(label,s.graphics_native_sss);
+-    if (const char* label=Item("Directional shading (live)","Directional shading (live)","graphics_ggx_mode")) {
+-        static const char* modes[]={"Original","GGX hybrid","GGX full"};
+-        int value=s.graphics_ggx_mode; if(ImGui::Combo(label,&value,modes,3)) Store(s.graphics_ggx_mode,value,true);
+-    }
+-    if (const char* label=Item("Tonemapper (live; SDR curve path)","Tonemapper (live; SDR curve path)","graphics_tonemapper")) {
+-        static const char* modes[]={"Original","GT7","ACES"};
+-        int value=s.graphics_tonemapper; if(ImGui::Combo(label,&value,modes,3)) Store(s.graphics_tonemapper,value,true);
+-    }
+-    if (const char* label=Item("Bloom mode (live)","Bloom mode (live)","graphics_bloom_quality")) {
+-        static const char* modes[]={"Original bloom","Froyok bloom"};
+-        int value=s.graphics_bloom_quality; if(ImGui::Combo(label,&value,modes,2)) Store(s.graphics_bloom_quality,value,true);
+-    }
+-    if (const char* label=Item("Local light intensity (restart required)","Local light intensity (restart required)","graphics_light_intensity")) {
+-        float value=s.graphics_light_intensity; if(ImGui::SliderFloat(label,&value,0.1f,4.0f)) Store(s.graphics_light_intensity,value,true);
+-    }
+-    if (const char* label=Item("Local light source size (restart required)","Local light source size (restart required)","graphics_light_core")) {
+-        float value=s.graphics_light_core; if(ImGui::SliderFloat(label,&value,0.01f,1.0f)) Store(s.graphics_light_core,value,true);
+-    }
+-    if (const char* label=Item("Local light sharpness (restart required)","Local light sharpness (restart required)","graphics_light_sharpness")) {
+-        float value=s.graphics_light_sharpness; if(ImGui::SliderFloat(label,&value,1.0f,8.0f)) Store(s.graphics_light_sharpness,value,true);
+-    }
+-    if (const char* label=Item("Alternative tone exposure (live)","Alternative tone exposure (live)","graphics_tonemap_exposure")) {
+-        float value=s.graphics_tonemap_exposure; if(ImGui::SliderFloat(label,&value,0.25f,4.0f)) Store(s.graphics_tonemap_exposure,value,true);
+-    }
+-    if (const char* label=Item("Froyok blend (live)","Froyok blend (live)","graphics_froyok_blend")) {
+-        float value=s.graphics_froyok_blend; if(ImGui::SliderFloat(label,&value,0.0f,1.0f)) Store(s.graphics_froyok_blend,value,true);
+-    }
+-    if (const char* label=Item("Froyok spread (live)","Froyok spread (live)","graphics_froyok_spread")) {
+-        float value=s.graphics_froyok_spread; if(ImGui::SliderFloat(label,&value,0.0f,1.0f)) Store(s.graphics_froyok_spread,value,true);
+-    }
+-    if (!preset_reference_mode && ImGui::Button("Recalibrate native exposure")) BbEngine::Exposure::Recalibrate();
+-    const auto exposure_status=BbEngine::Exposure::CurrentStatus();
+-    const auto sss_status=BbEngine::Sss::CurrentStatus();
+-    ImGui::Text("Native exposure: %s (%.2f EV); SSS: %s",
+-        exposure_status==BbEngine::Exposure::Status::Active ? "active" :
+-        exposure_status==BbEngine::Exposure::Status::Off ? "off" : "waiting / unavailable (see log)",
+-        BbEngine::Exposure::CurrentStops(),
+-        sss_status==BbEngine::Sss::Status::Active ? "active" :
+-        sss_status==BbEngine::Sss::Status::Off ? "off" :
+-        sss_status==BbEngine::Sss::Status::Waiting ? "waiting" : "unavailable");
+-    Hint("Tonemapper alternatives are bypassed when the HDR scene curve owns the output.");
+-    if (const char* label = Item("Depth of field mode (restart required)","Depth of field mode (restart required)","graphics_dof_mode")) {
+-        static const char* modes[]={"Original DoF","Modern DoF"};
+-        int value=s.graphics_dof_mode; if(ImGui::Combo(label,&value,modes,2)) Store(s.graphics_dof_mode,value,true);
+-        Hint("Keep Depth of field (DoF) enabled. Modern mode follows the map's authored far blur; unsupported paths retain original DoF.");
+-    }
+-    if (const char* label = Item("DoF intensity (live in Modern mode)","DoF intensity (live in Modern mode)","graphics_dof_intensity")) {
+-        float value=s.graphics_dof_intensity; if(ImGui::SliderFloat(label,&value,0.0f,3.0f)) Store(s.graphics_dof_intensity,value,true);
+-    }
+-    if (const char* label = Item("GTAO (restart required)", "GTAO (restart required)", "graphics_gtao")) {
+-        Checkbox(label, s.graphics_gtao);
+-        Hint("Replaces the game's SSAO pass. Ambient occlusion (SSAO) must remain enabled. "
+-             "Uses the existing AO strength with Picture tuning on; unsupported layouts retain SSAO.");
+-    }
+-    if (const char* label = Item("HQ GTAO (restart required)", "HQ GTAO (restart required)", "graphics_ao_quality")) {
+-        bool high = s.graphics_ao_quality == 1;
+-        if (ImGui::Checkbox(label, &high)) Store(s.graphics_ao_quality, high ? 1 : 0, true);
+-        Hint("Requires GTAO. Full internal-resolution AO with spatial denoising; more GPU cost.");
+-    }
+-    if (const char* label = Item("SSGI (live)", "SSGI (live)", "graphics_ssgi")) Checkbox(label, s.graphics_ssgi);
+-    if (const char* label = Item("Indirect lighting strength", "Indirect lighting strength", "graphics_gi_strength")) {
+-        float value = s.graphics_gi_strength;
+-        if (ImGui::SliderFloat(label, &value, 0.0f, 12.0f)) Store(s.graphics_gi_strength, value, true);
+-    }
+-    if (const char* label = Item("Stochastic SSR (restart required)", "Stochastic SSR (restart required)", "graphics_modern_ssr")) {
+-        Checkbox(label, s.graphics_modern_ssr);
+-        Hint("Requires the original screen-space reflections switch below. Unsupported shader profiles retain original reflections.");
+-    }
+-    if (const char* label = Item("Reflection intensity", "Reflection intensity", "graphics_ssr_intensity")) {
+-        float value = s.graphics_ssr_intensity;
+-        if (ImGui::SliderFloat(label, &value, 0.0f, 3.0f)) Store(s.graphics_ssr_intensity, value, true);
+-    }
+-    if (const char* label = Item("PCSS sun shadows (restart required)", "PCSS sun shadows (restart required)", "graphics_pcss")) Checkbox(label, s.graphics_pcss);
+-    if (const char* label=Item("Contact shadows (live)","Contact shadows (live)","graphics_contact_shadows")) Checkbox(label,s.graphics_contact_shadows);
+-    if (const char* label=Item("Volumetric sunlight (live)","Volumetric sunlight (live)","graphics_volumetric_light")) Checkbox(label,s.graphics_volumetric_light);
+-    if (const char* label=Item("Point-light volumetric fog (live)","Point-light volumetric fog (live)","graphics_point_fog")) Checkbox(label,s.graphics_point_fog);
+-    if (const char* label=Item("Directional filtering and cascade blend (restart required)","Directional filtering and cascade blend (restart required)","graphics_directional_filter")) Checkbox(label,s.graphics_directional_filter);
+-    if (const char* label=Item("Point-light shadows (live)","Point-light shadows (live)","graphics_point_shadows")) Checkbox(label,s.graphics_point_shadows);
+-    if (const char* label=Item("Point shadow strength","Point shadow strength","graphics_point_shadow_strength")) {
+-        float value=s.graphics_point_shadow_strength; if (ImGui::SliderFloat(label,&value,0.0f,1.0f)) Store(s.graphics_point_shadow_strength,value,true);
+-    }
+-    if (const char* label=Item("Contact shadow strength","Contact shadow strength","graphics_contact_strength")) {
+-        float value=s.graphics_contact_strength; if (ImGui::SliderFloat(label,&value,0.0f,1.0f)) Store(s.graphics_contact_strength,value,true);
+-    }
+-    if (const char* label=Item("Sunlight volume intensity","Sunlight volume intensity","graphics_volumetric_intensity")) {
+-        float value=s.graphics_volumetric_intensity; if (ImGui::SliderFloat(label,&value,0.0f,3.0f)) Store(s.graphics_volumetric_intensity,value,true);
+-    }
+-    if (const char* label=Item("Point fog intensity","Point fog intensity","graphics_point_fog_intensity")) {
+-        float value=s.graphics_point_fog_intensity; if (ImGui::SliderFloat(label,&value,0.0f,3.0f)) Store(s.graphics_point_fog_intensity,value,true);
+-    }
+-    if (const char* label=Item("Directional shadow resolution (restart required)","Directional shadow resolution (restart required)","graphics_shadow_resolution")) {
+-        static const char* choices[]={"Original","High: 4096 atlas","Ultra: 8192 atlas"};
+-        const int selected=s.graphics_shadow_resolution;
+-        if (ImGui::BeginCombo(label,choices[selected])) {
+-            for (int i=0;i<3;++i) if (ImGui::Selectable(choices[i],i==selected)) Store(s.graphics_shadow_resolution,i,true);
+-            ImGui::EndCombo();
+-        }
+-    }
+-    if (const char* label=Item("Local shadow resolution (restart required)","Local shadow resolution (restart required)","graphics_local_shadow_resolution")) {
+-        static const char* choices[]={"Original","High: point 1024 / spot 2048","Ultra: point 2048 / spot 4096"};
+-        const int selected=s.graphics_local_shadow_resolution;
+-        if (ImGui::BeginCombo(label,choices[selected])) {
+-            for (int i=0;i<3;++i) if (ImGui::Selectable(choices[i],i==selected)) Store(s.graphics_local_shadow_resolution,i,true);
+-            ImGui::EndCombo();
+-        }
+-    }
+-    for (int e = 0; e < BbSettings::EffectCount; ++e) {
+-        const auto& effect = BbSettings::Effects[e];
+-        const char* label = Item(effect.label, effect.label_ru, effect.key);
+-        if (!label) {
+-            continue;
+-        }
+-        Checkbox(label, s.effects[e]);
+-        if (std::strcmp(effect.key, "effect_dynamic_shadows") == 0) {
+-            Hint(BbSettings::MenuText(
+-                "Effects are enabled and disabled by game patches at startup (patches/Bloodborne.xml). "
+-                "Motion blur and shadows from dynamic lights place a significant load on the GPU.",
+-                "Эффекты включаются и выключаются патчами игры при запуске (patches/Bloodborne.xml). "
+-                "Размытие в движении и тени от динамических источников заметно нагружают GPU."));
+-        } else if (std::strcmp(effect.key, "debug_menu") == 0) {
+-            Hint(BbSettings::MenuText(
+-                "Free camera: hold Cross and press L3 (keyboard: Space + Z). "
+-                "Debug menu: left touchpad / Tab. Requires DbgFont14h.ccm and DbgFont14h.tpf "
+-                "in dvdroot_ps4/font from Nexus mod #253. Right touchpad: Backspace.",
+-                "Свободная камера: удерживайте Cross и нажимайте L3 (клавиатура: Space + Z). "
+-                "Debug menu: левый touchpad / Tab. Нужны DbgFont14h.ccm и DbgFont14h.tpf "
+-                "в dvdroot_ps4/font из мода Nexus #253. Правый touchpad: Backspace."));
+-        }
+-    }
+-}
++
++bool GraphicsChildren(bool selected) { return selected || Searching() || preset_reference_mode; }
++void GraphicsDefault(const char* key,auto& value,auto factory) {
++    if(preset_reference_mode) return;
++    ImGui::SameLine(); ImGui::PushID(key);
++    if(ImGui::SmallButton("Default")) Store(value,factory,true);
++    Hint("Restore this option to its factory default.");ImGui::PopID();
++}
++void GraphicsBool(const char* key,const char* title,std::atomic<bool>& value,bool factory,const char* help) {
++    if(const char* label=Item(title,title,key)) { Checkbox(label,value);Hint(help);GraphicsDefault(key,value,factory); }
++}
++void GraphicsFloat(const char* key,const char* title,std::atomic<float>& value,float lo,float hi,float factory,const char* help) {
++    if(const char* label=Item(title,title,key)) {
++        const auto percent=[&](float native) { return 1.0f+99.0f*std::clamp((native-lo)/(hi-lo),0.0f,1.0f); };
++        float shown=percent(value.load());const float width=ImGui::CalcItemWidth();
++        const bool reset=SliderReset(label,shown,percent(factory));if(reset) shown=percent(factory);
++        ImGui::SetNextItemWidth(std::max(60.0f,width-ImGui::GetFrameHeight()-ImGui::GetStyle().ItemSpacing.x));
++        ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize,20.0f*base_scale);
++        const bool changed=ImGui::SliderFloat(label,&shown,1.0f,100.0f,"%.1f",ImGuiSliderFlags_AlwaysClamp);
++        ImGui::PopStyleVar();
++        if(changed || reset) Store(value,reset?factory:lo+(std::clamp(shown,1.0f,100.0f)-1.0f)*(hi-lo)/99.0f,true);
++        Hint(help);
++        if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n1-100; arrows adjust, Ctrl-click to type.\n%s",title,help);
++    }
++}
++void GraphicsChoice(const char* key,const char* title,std::atomic<int>& value,std::initializer_list<const char*> choices,const char* help) {
++    if(const char* label=Item(title,title,key)) {
++        std::vector<const char*> names(choices);int selected=std::clamp(value.load(),0,int(names.size())-1);
++        if(ImGui::Combo(label,&selected,names.data(),int(names.size()))) Store(value,selected,true);
++        Hint(help);GraphicsDefault(key,value,0);
++    }
++}
++void EffectsSectionLegacy() {
++    auto& s=BbSettings::Get();
++    Section("Advanced lighting and effects");
++    GraphicsBool("graphics_advanced_enabled","Advanced lighting and effects",s.graphics_advanced_enabled,true,
++        "Live bypass for the new material and postprocessing enhancements. Keeps your individual selections. Original game switches and existing AO/GI/shadow settings remain independent.");
++    if(!preset_reference_mode && ImGui::Button("Restore advanced defaults")) { BbSettings::ResetAdvancedGraphics(); dirty=true; }
++    ImGui::SeparatorText("Depth of field");
++        GraphicsBool("effect_dof","Depth of field (restart required)",s.effects[1],false,"Blurs areas outside the camera focus. This native master switch is applied when the game starts.");
++    if(GraphicsChildren(s.graphics_advanced_enabled && (s.effects[1]))) {
++        GraphicsChoice("graphics_dof_mode","Depth of field style (restart required)",s.graphics_dof_mode,{"Original","Modern bokeh"},"Modern follows map-authored blur and autofocus. Unsupported passes retain the original effect.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled && (s.effects[1] && s.graphics_dof_mode == 1))) {
++        GraphicsFloat("graphics_dof_intensity","Focus blur strength",s.graphics_dof_intensity,0.0f,3.0f,1.0f,"Live in Modern mode. Zero removes the modern blur contribution.");
++    }
++    ImGui::SeparatorText("Motion blur");
++        GraphicsBool("effect_motion_blur","Motion blur (restart required)",s.effects[2],false,"Native motion blur master. The existing upscaler blur-suppression policy still takes precedence.");
++    if(GraphicsChildren(s.graphics_advanced_enabled && (s.effects[2]))) {
++        GraphicsBool("graphics_motion_blur_quality","Improved motion blur (live)",s.graphics_motion_blur_quality,false,"More accurate long motion trails, with depth and velocity rejection.");
++    if(GraphicsChildren(s.graphics_advanced_enabled && s.graphics_motion_blur_quality)) { GraphicsFloat("graphics_motion_blur_strength","Motion blur strength",s.graphics_motion_blur_strength,0.0f,1.0f,1.0f,"Live effect control, 1-100. Defaults preserve the previous rendering."); }
++    }
++    ImGui::SeparatorText("Bloom and exposure");
++    if(GraphicsChildren(s.graphics_advanced_enabled)) {
++        GraphicsChoice("graphics_bloom_quality","Bloom style (live)",s.graphics_bloom_quality,{"Original bloom","Froyok bloom"},"Bloom spreads bright light into surrounding pixels. Froyok uses a multi-scale HDR filter; only its own controls below affect that alternative.");
++    }
++    if(GraphicsChildren((s.graphics_bloom_quality == 0 || !s.graphics_advanced_enabled))) {
++        { const float before=s.graphics_bloom; GraphicsFloat("graphics_bloom","Original bloom intensity",s.graphics_bloom,0.0f,3.0f,1.0f,"Game-authored bloom intensity; enables Picture tuning. Froyok has its own blend control."); if(before!=s.graphics_bloom.load()) Store(s.graphics_controls,true,true); }
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled && (s.graphics_bloom_quality == 1))) {
++        GraphicsFloat("graphics_froyok_blend","Froyok bloom amount",s.graphics_froyok_blend,0.0f,1.0f,0.04f,"Live blend between the sharp scene and Froyok glow. Zero means no Froyok glow; one gives the fully blurred result.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled && (s.graphics_bloom_quality == 1 && s.graphics_froyok_blend > 0.0f))) {
++        GraphicsFloat("graphics_froyok_spread","Froyok glow spread",s.graphics_froyok_spread,0.0f,1.0f,0.85f,"Live balance of small and large glow scales. Requires a nonzero bloom amount. Higher values spread bright light farther.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled)) {
++        GraphicsBool("graphics_auto_exposure","Automatic scene exposure (live)",s.graphics_auto_exposure,false,"Adapts around the area-authored exposure, bounded to -1 / +0.5 EV. Different from the DLSS model auto-exposure option.");
++    if(GraphicsChildren(s.graphics_advanced_enabled && s.graphics_auto_exposure)) { GraphicsFloat("graphics_exposure_strength","Exposure adaptation strength",s.graphics_exposure_strength,0.0f,1.0f,1.0f,"Live effect control, 1-100. Defaults preserve the previous rendering."); }
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled)) {
++        GraphicsChoice("graphics_tonemapper","Tone mapping (live)",s.graphics_tonemapper,{"Original","GT7","ACES"},"Controls how scene highlights fit the display. The existing HDR scene curve takes precedence when active.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled && (s.graphics_tonemapper != 0))) {
++        GraphicsFloat("graphics_tonemap_exposure","Tone mapping exposure",s.graphics_tonemap_exposure,0.25f,4.0f,1.0f,"Live brightness before the selected alternative tone curve; Original ignores this control.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled && s.graphics_bloom_quality==1)) {
++        static const char* state[]={"off","waiting for a compatible postprocessing pass","active","unavailable: original bloom retained"};
++        ImGui::TextWrapped("Froyok bloom: %s",state[std::clamp(s.graphics_froyok_status.load(),0,3)]);
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled && s.graphics_auto_exposure)) {
++        if(!preset_reference_mode && ImGui::Button("Recalibrate scene exposure")) BbEngine::Exposure::Recalibrate();
++        const auto status=BbEngine::Exposure::CurrentStatus();
++        const char* exposure=status==BbEngine::Exposure::Status::Active ? "active" :
++            status==BbEngine::Exposure::Status::Calibrating ? "learning this area's neutral exposure" :
++            status==BbEngine::Exposure::Status::Waiting ? "waiting for gameplay" :
++            status==BbEngine::Exposure::Status::Off ? "off" : "unavailable: original exposure retained";
++        ImGui::TextWrapped("Automatic exposure: %s (%.2f EV)",exposure,BbEngine::Exposure::CurrentStops());
++    }
++    ImGui::SeparatorText("Ambient shading and indirect light");
++        GraphicsBool("effect_ssao","Ambient surface shading (restart required)",s.effects[3],true,"Ambient occlusion (SSAO) darkens creases and contact areas; it does not add bounced light.");
++    if(GraphicsChildren((s.effects[3]))) {
++        GraphicsBool("graphics_gtao","Improved ambient shading: GTAO (restart required)",s.graphics_gtao,false,"Ground-truth ambient occlusion replaces native SSAO on compatible passes.");
++    }
++    if(GraphicsChildren((s.effects[3] && s.graphics_gtao))) {
++        GraphicsChoice("graphics_ao_quality","Ambient shading quality (restart required)",s.graphics_ao_quality,{"Regular GTAO","High quality GTAO"},"High quality adds full internal-resolution AO and denoising, with extra GPU cost.");
++    }
++    if(GraphicsChildren((s.effects[3]))) {
++        { const float before=s.graphics_ao_strength; GraphicsFloat("graphics_ao_strength","Ambient shading strength",s.graphics_ao_strength,0.0f,3.0f,1.0f,"Live native AO strength; enables Picture tuning."); if(before!=s.graphics_ao_strength.load()) Store(s.graphics_controls,true,true); }
++    }
++        GraphicsBool("graphics_ssgi","Indirect lighting (SSGI, live)",s.graphics_ssgi,false,"Screen-space global illumination estimates light bounced from visible surfaces. Off-screen objects cannot contribute; adds GPU cost.");
++    if(GraphicsChildren((s.graphics_ssgi))) {
++        GraphicsFloat("graphics_gi_strength","Bounced-light strength",s.graphics_gi_strength,0.0f,12.0f,6.0f,"Live strength of screen-space indirect lighting.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled && (s.effects[3] || s.graphics_ssgi))) {
++        GraphicsBool("graphics_smooth_normals","Smoother indirect shading (live)",s.graphics_smooth_normals,false,"Averages compatible surface normals for AO/GI to reduce shimmer; keeps depth edges separate.");
++    }
++    ImGui::SeparatorText("Reflections");
++        GraphicsBool("effect_ssr","Screen-space reflections (restart required)",s.effects[6],false,"Reflects visible on-screen geometry. Geometry outside the screen cannot appear in these reflections.");
++    if(GraphicsChildren((s.effects[6]))) {
++        GraphicsBool("graphics_modern_ssr","Improved reflections (restart required)",s.graphics_modern_ssr,false,"Stochastic screen-space reflections with temporal reconstruction; requires the native reflections master above.");
++    }
++    if(GraphicsChildren((s.effects[6] && s.graphics_modern_ssr))) {
++        GraphicsFloat("graphics_ssr_intensity","Reflection strength",s.graphics_ssr_intensity,0.0f,3.0f,1.0f,"Live strength of improved reflections.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled)) {
++        GraphicsBool("graphics_env_tails","Broader environment highlights (live)",s.graphics_env_tails,false,"Adds a softer GGX tail to existing environment-map highlights. Does not capture nearby characters or new reflection geometry.");
++    }
++    ImGui::SeparatorText("Material highlights and local lights");
++    if(GraphicsChildren(s.graphics_advanced_enabled)) {
++        GraphicsChoice("graphics_ggx_mode","Sun and material highlights (live)",s.graphics_ggx_mode,{"Original","Balanced highlights (hybrid GGX)","Physical highlights (full GGX)"},"GGX is a physically based highlight model. Original keeps authored highlights; full can make materials look substantially different.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled)) {
++        GraphicsBool("graphics_local_ggx","Physical local-light highlights (live)",s.graphics_local_ggx,false,"Uses GGX highlights for compatible lamp-lit materials.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled)) {
++        GraphicsBool("graphics_specular_aa","Reduce highlight shimmer (live)",s.graphics_specular_aa,false,"Specular antialiasing broadens tiny unstable highlights to reduce sparkle during movement.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled)) {
++        GraphicsBool("graphics_local_falloff","Natural light falloff (live)",s.graphics_local_falloff,false,"Inverse-square attenuation changes how existing lamps fade with distance. It does not add reflected or bounced light.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled && (s.graphics_local_falloff))) {
++        GraphicsFloat("graphics_light_intensity","Local light brightness",s.graphics_light_intensity,0.1f,4.0f,1.0f,"Live intensity of compatible inverse-square local lights. Requires Natural light falloff; does not affect sun or emission textures.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled && (s.graphics_local_falloff))) {
++        GraphicsFloat("graphics_light_core","Local light source size",s.graphics_light_core,0.01f,1.0f,0.05f,"Live finite source radius relative to the lamp range. Larger values soften the near-light intensity peak.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled && (s.graphics_local_falloff || s.graphics_local_ggx))) {
++        GraphicsFloat("graphics_light_sharpness","Local highlight sharpness",s.graphics_light_sharpness,1.0f,8.0f,1.0f,"Live gloss-lobe sharpness for compatible local lights. Does not change shadow-map softness.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled)) {
++        GraphicsBool("graphics_native_sss","Skin light scattering (live)",s.graphics_native_sss,false,"Subsurface scattering lets light spread through compatible skin materials. Waits until native skin resources are available.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled)) {
++        GraphicsBool("graphics_pom","Surface depth and cavity shading (live)",s.graphics_pom,false,"Parallax occlusion mapping (POM) adds apparent depth and cavity shading to supported textures; it does not add mesh geometry.");
++    }
++    if(s.graphics_advanced_enabled && s.graphics_native_sss) {
++        const auto status=BbEngine::Sss::CurrentStatus();
++        ImGui::TextWrapped("Skin scattering: %s",status==BbEngine::Sss::Status::Active ? "active" :
++            status==BbEngine::Sss::Status::Waiting ? "waiting for a compatible skin view" :
++            status==BbEngine::Sss::Status::Off ? "off" : "unavailable: original materials retained");
++    }
++    ImGui::SeparatorText("Shadows");
++        GraphicsBool("effect_dynamic_shadows","Shadows from local lights (restart required)",s.effects[5],true,"Native shadows cast by lamps and other dynamic lights.");
++        GraphicsBool("graphics_pcss","Soft sun shadows (restart required)",s.graphics_pcss,false,"PCSS contact-hardening shadows grow softer farther from the caster.");
++    if(GraphicsChildren(s.graphics_pcss)) { GraphicsFloat("graphics_pcss_softness","Sun shadow softness",s.graphics_pcss_softness,0.0f,2.0f,1.0f,"Live effect control, 1-100. Defaults preserve the previous rendering."); }
++        GraphicsBool("graphics_directional_filter","Smoother sun-shadow transitions (restart required)",s.graphics_directional_filter,false,"Filters directional shadow edges and blends cascade boundaries.");
++    if(GraphicsChildren(s.graphics_directional_filter)) { GraphicsFloat("graphics_shadow_filter_strength","Shadow transition blend",s.graphics_shadow_filter_strength,0.0f,1.0f,1.0f,"Live effect control, 1-100. Defaults preserve the previous rendering."); }
++        GraphicsChoice("graphics_shadow_resolution","Sun shadow resolution (restart required)",s.graphics_shadow_resolution,{"Original","High: 4096 atlas","Ultra: 8192 atlas"},"Higher settings consume more video memory.");
++    if(GraphicsChildren((s.effects[5]))) {
++        GraphicsChoice("graphics_local_shadow_resolution","Local shadow resolution (restart required)",s.graphics_local_shadow_resolution,{"Original","High: point 1024 / spot 2048","Ultra: point 2048 / spot 4096"},"Higher settings consume more video memory.");
++    }
++        { const float before=s.graphics_shadow_scale; GraphicsFloat("graphics_shadow_scale","Shadow distance",s.graphics_shadow_scale,0.5f,4.0f,1.0f,"Live native shadow distance multiplier; enables Picture tuning."); if(before!=s.graphics_shadow_scale.load()) Store(s.graphics_controls,true,true); }
++        GraphicsBool("graphics_contact_shadows","Small contact shadows (live)",s.graphics_contact_shadows,false,"Adds short screen-space shadows where nearby surfaces meet.");
++    if(GraphicsChildren((s.graphics_contact_shadows))) {
++        GraphicsFloat("graphics_contact_strength","Contact shadow strength",s.graphics_contact_strength,0.0f,1.0f,1.0f,"Live strength of small contact shadows.");
++    }
++        GraphicsBool("graphics_point_shadows","Enhanced point-light shadows (live)",s.graphics_point_shadows,false,"Adds compatible point-light occlusion from the existing depth information.");
++    if(GraphicsChildren((s.graphics_point_shadows))) {
++        GraphicsFloat("graphics_point_shadow_strength","Point-light shadow strength",s.graphics_point_shadow_strength,0.0f,1.0f,0.85f,"Live strength of enhanced point-light shadows.");
++    }
++    ImGui::SeparatorText("Fog, light shafts and sky");
++        { const float before=s.graphics_fog; GraphicsFloat("graphics_fog","Distance fog intensity",s.graphics_fog,0.0f,3.0f,1.0f,"Live native haze multiplier; enables Picture tuning."); if(before!=s.graphics_fog.load()) Store(s.graphics_controls,true,true); }
++        GraphicsBool("graphics_volumetric_light","Sunlight shafts (live)",s.graphics_volumetric_light,false,"Directional volumetric lighting makes sunlight visible through fog.");
++    if(GraphicsChildren((s.graphics_volumetric_light))) {
++        GraphicsFloat("graphics_volumetric_intensity","Sunlight shaft intensity",s.graphics_volumetric_intensity,0.0f,3.0f,1.0f,"Live strength of directional light scattering.");
++    }
++        GraphicsBool("graphics_point_fog","Lamp light in fog (live)",s.graphics_point_fog,false,"Point-light volumetric fog makes compatible lamps illuminate the haze.");
++    if(GraphicsChildren((s.graphics_point_fog))) {
++        GraphicsFloat("graphics_point_fog_intensity","Lamp fog intensity",s.graphics_point_fog_intensity,0.0f,3.0f,1.0f,"Live strength of local-light fog scattering.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled)) {
++        GraphicsBool("graphics_sky_seam","Correct sky seam (live)",s.graphics_sky_seam,false,"Corrects the verified Hunter's Dream panorama seam; unsupported sky geometry remains original.");
++    }
++    if(GraphicsChildren(s.graphics_advanced_enabled && (s.graphics_sky_seam))) {
++        GraphicsBool("graphics_sky_zenith","Smooth top-of-sky banding (live)",s.graphics_sky_zenith,false,"Filters the verified Dream sky zenith. Requires sky seam correction.");
++    if(GraphicsChildren(s.graphics_advanced_enabled && s.graphics_sky_zenith)) { GraphicsFloat("graphics_sky_smoothing_strength","Sky smoothing strength",s.graphics_sky_smoothing_strength,0.0f,1.0f,1.0f,"Live effect control, 1-100. Defaults preserve the previous rendering."); }
++    }
++    ImGui::SeparatorText("Other game effects (restart required)");
++    if(const char* label=Item("Model detail","Model detail","model_lod")) {
++        static const char* names[]={"Highest","Original","Lower","Lowest"};
++        static const int values[]={-2,0,1,2};int selected=1;
++        for(int i=0;i<4;++i) if(s.model_lod==values[i]) selected=i;
++        if(ImGui::Combo(label,&selected,names,4)) Store(s.model_lod,values[selected],true);
++    }
++    for(int e : {0,4,7,8,9}) {
++        const auto& effect=BbSettings::Effects[e];
++        GraphicsBool(effect.key,effect.label,s.effects[e],effect.default_on,
++            "Native game option applied at startup. Free-camera and debug-menu controls retain their original requirements.");
++    }
++}
++
++
++
++
++
++void EffectsSection() { EffectsSectionLegacy(); }
+ 
+ // The upscaler, its preset and sharpening, frame generation.
+ void UpscalerSection() {
+@@ -1819,18 +1857,18 @@
+         selected_preset = spec_preset_requested;
+         selected_name=spec_preset_names[selected_preset];
+         import_selected=false;
+-        ImGui::OpenPopup("Apply spec preset?###spec_confirm");
++        ImGui::OpenPopup("Apply preset?###spec_confirm");
+         spec_preset_requested = -1;
+     }
+     if (custom_apply_request) {
+         selected_document=std::move(*custom_apply_request); custom_apply_request.reset();
+         selected_preset=2; selected_name=selected_document.name;
+         import_selected=custom_import_request; custom_import_request=false;
+-        ImGui::OpenPopup("Apply spec preset?###spec_confirm");
++        ImGui::OpenPopup("Apply preset?###spec_confirm");
+     }
+     const auto center = ImGui::GetMainViewport()->GetCenter();
+     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+-    if (ImGui::BeginPopupModal("Apply spec preset?###spec_confirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
++    if (ImGui::BeginPopupModal("Apply preset?###spec_confirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+         ImGui::TextUnformatted("Apply the settings included in this preset");
+         ImGui::Text("with %s?", selected_name.c_str());
+         ImGui::TextUnformatted("Settings excluded from this preset will be kept.");
+@@ -1889,8 +1927,8 @@
+ const char* TabTitle(int tab) {
+     switch (tab) {
+     case TabUpscaling: return BbSettings::MenuText("Upscaling", "Апскейлинг");
+-    case TabNeuralRendering: return "NR";
+-    case TabSpecPreset: return "Spec preset";
++    case TabNeuralRendering: return "Neural Rendering";
++    case TabSpecPreset: return "Presets";
+     case TabDisplay: return BbSettings::MenuText("Display", "Экран");
+     case TabPicture: return BbSettings::MenuText("Picture", "Изображение");
+     case TabGameplay: return BbSettings::MenuText("Gameplay", "Игра");
+@@ -2063,9 +2101,6 @@
+ 
+     const float footer_top = ImGui::GetCursorPosY();
+     bool restart =
+-        s.graphics_light_intensity != s.startup_light_intensity ||
+-        s.graphics_light_core != s.startup_light_core ||
+-        s.graphics_light_sharpness != s.startup_light_sharpness ||
+         s.graphics_dof_mode != s.startup_dof_mode ||
+         s.graphics_directional_filter != s.startup_directional_filter ||
+         s.graphics_shadow_resolution != s.startup_shadow_resolution ||
+diff --git a/gpu/shim/bbport_settings.cpp b/gpu/shim/bbport_settings.cpp
+--- a/gpu/shim/bbport_settings.cpp
++++ b/gpu/shim/bbport_settings.cpp
+@@ -384,6 +384,8 @@
+         v.graphics_gi_strength = Clamp(std::isfinite(f) ? f : 6.0f, 0.0f, 12.0f);
+     } else if (key == "graphics_ssr_intensity") {
+         v.graphics_ssr_intensity = Clamp(std::isfinite(f) ? f : 1.0f, 0.0f, 3.0f);
++    } else if (key == "graphics_advanced_enabled") {
++        v.graphics_advanced_enabled = i != 0;
+     } else if (key == "graphics_smooth_normals") {
+         v.graphics_smooth_normals = i != 0;
+     } else if (key == "graphics_sky_seam") {
+@@ -402,6 +404,16 @@
+         v.graphics_env_tails = i != 0;
+     } else if (key == "graphics_local_falloff") {
+         v.graphics_local_falloff = i != 0;
++    } else if (key == "graphics_pcss_softness") {
++        v.graphics_pcss_softness = Clamp(std::isfinite(f) ? f : 1.0f,0.0f,2.0f);
++    } else if (key == "graphics_shadow_filter_strength") {
++        v.graphics_shadow_filter_strength = Clamp(std::isfinite(f) ? f : 1.0f,0.0f,1.0f);
++    } else if (key == "graphics_exposure_strength") {
++        v.graphics_exposure_strength = Clamp(std::isfinite(f) ? f : 1.0f,0.0f,1.0f);
++    } else if (key == "graphics_motion_blur_strength") {
++        v.graphics_motion_blur_strength = Clamp(std::isfinite(f) ? f : 1.0f,0.0f,1.0f);
++    } else if (key == "graphics_sky_smoothing_strength") {
++        v.graphics_sky_smoothing_strength = Clamp(std::isfinite(f) ? f : 1.0f,0.0f,1.0f);
+     } else if (key == "graphics_auto_exposure") {
+         v.graphics_auto_exposure = i != 0;
+     } else if (key == "graphics_native_sss") {
+@@ -607,7 +619,7 @@
+         &Values::hdr_ui_brightness, &Values::hdr_ui_color, &Values::render_scale, &Values::mip_bias,
+         &Values::graphics_brightness, &Values::graphics_contrast, &Values::graphics_saturation,
+         &Values::graphics_hue, &Values::graphics_fog, &Values::graphics_bloom,
+-        &Values::graphics_light_intensity, &Values::graphics_light_core, &Values::graphics_light_sharpness, &Values::graphics_tonemap_exposure, &Values::graphics_froyok_blend, &Values::graphics_froyok_spread, &Values::graphics_dof_intensity, &Values::graphics_ao_strength, &Values::graphics_shadow_scale,
++        &Values::graphics_pcss_softness, &Values::graphics_shadow_filter_strength, &Values::graphics_exposure_strength, &Values::graphics_motion_blur_strength, &Values::graphics_sky_smoothing_strength, &Values::graphics_light_intensity, &Values::graphics_light_core, &Values::graphics_light_sharpness, &Values::graphics_tonemap_exposure, &Values::graphics_froyok_blend, &Values::graphics_froyok_spread, &Values::graphics_dof_intensity, &Values::graphics_ao_strength, &Values::graphics_shadow_scale,
+         &Values::graphics_gi_strength, &Values::graphics_ssr_intensity,
+         &Values::graphics_point_shadow_strength, &Values::graphics_contact_strength, &Values::graphics_volumetric_intensity, &Values::graphics_point_fog_intensity,
+         &Values::camera_fov_scale, &Values::camera_distance_scale, &Values::camera_height_scale,
+@@ -802,6 +814,38 @@
+ 
+ void ApplyRtx3070SlopCinematic() {
+     for (const auto& [key, value] : Rtx3070SlopCinematic) Set(Get(), key, value);
++}
++
++
++void ResetAdvancedGraphics() {
++    auto& v=Get(); v.graphics_advanced_enabled=true;
++    v.graphics_smooth_normals=false;
++    v.graphics_sky_seam=false;
++    v.graphics_sky_zenith=false;
++    v.graphics_pom=false;
++    v.graphics_motion_blur_quality=false;
++    v.graphics_local_ggx=false;
++    v.graphics_specular_aa=false;
++    v.graphics_env_tails=false;
++    v.graphics_local_falloff=false;
++    v.graphics_auto_exposure=false;
++    v.graphics_exposure_strength=1.0f;
++
++    v.graphics_motion_blur_strength=1.0f;
++    v.graphics_sky_smoothing_strength=1.0f;
++
++    v.graphics_native_sss=false;
++    v.graphics_ggx_mode=0;
++    v.graphics_tonemapper=0;
++    v.graphics_bloom_quality=0;
++    v.graphics_dof_mode=0;
++    v.graphics_light_intensity=1.0f;
++    v.graphics_light_core=0.05f;
++    v.graphics_light_sharpness=1.0f;
++    v.graphics_tonemap_exposure=1.0f;
++    v.graphics_froyok_blend=0.04f;
++    v.graphics_froyok_spread=0.85f;
++    v.graphics_dof_intensity=1.0f;
+ }
+ 
+ SettingList SnapshotSettings(const Values& v) {
+@@ -927,6 +971,7 @@
+     put("graphics_shadow_scale",fixed(v.graphics_shadow_scale,2));
+     put("graphics_bloom",fixed(v.graphics_bloom,2));
+     put("graphics_saturation",fixed(v.graphics_saturation,2));
++    put("graphics_advanced_enabled",flag(v.graphics_advanced_enabled));
+     put("graphics_smooth_normals",flag(v.graphics_smooth_normals));
+     put("graphics_sky_seam",flag(v.graphics_sky_seam));
+     put("graphics_sky_zenith",flag(v.graphics_sky_zenith));
+@@ -937,6 +982,13 @@
+     put("graphics_env_tails",flag(v.graphics_env_tails));
+     put("graphics_local_falloff",flag(v.graphics_local_falloff));
+     put("graphics_auto_exposure",flag(v.graphics_auto_exposure));
++    put("graphics_exposure_strength",fixed(v.graphics_exposure_strength,4));
++    put("graphics_pcss_softness",fixed(v.graphics_pcss_softness,4));
++    put("graphics_shadow_filter_strength",fixed(v.graphics_shadow_filter_strength,4));
++
++    put("graphics_motion_blur_strength",fixed(v.graphics_motion_blur_strength,4));
++    put("graphics_sky_smoothing_strength",fixed(v.graphics_sky_smoothing_strength,4));
++
+     put("graphics_native_sss",flag(v.graphics_native_sss));
+     put("graphics_ggx_mode",std::to_string(v.graphics_ggx_mode.load()));
+     put("graphics_tonemapper",std::to_string(v.graphics_tonemapper.load()));
+diff --git a/gpu/shim/bbport_settings.h b/gpu/shim/bbport_settings.h
+--- a/gpu/shim/bbport_settings.h
++++ b/gpu/shim/bbport_settings.h
+@@ -246,6 +246,8 @@
+ 
+     // Froyok upstream limits; Original remains the default.
+     // Independent Tier 2 opt-ins; shaders latch discrete variants at frame boundaries.
++    std::atomic<bool> graphics_advanced_enabled{true}; // migrate existing selections unchanged
++    std::atomic<int> graphics_froyok_status{0}; // transient: off/waiting/active/unavailable
+     std::atomic<bool> graphics_smooth_normals{false};
+     std::atomic<bool> graphics_sky_seam{false};
+     std::atomic<bool> graphics_sky_zenith{false};
+@@ -256,6 +258,13 @@
+     std::atomic<bool> graphics_env_tails{false};
+     std::atomic<bool> graphics_local_falloff{false};
+     std::atomic<bool> graphics_auto_exposure{false};
++    std::atomic<float> graphics_exposure_strength{1.0f};
++    std::atomic<float> graphics_pcss_softness{1.0f};
++    std::atomic<float> graphics_shadow_filter_strength{1.0f};
++
++    std::atomic<float> graphics_motion_blur_strength{1.0f};
++    std::atomic<float> graphics_sky_smoothing_strength{1.0f};
++
+     std::atomic<bool> graphics_native_sss{false};
+     std::atomic<int> graphics_ggx_mode{0};
+     std::atomic<int> graphics_tonemapper{0};
+@@ -405,6 +414,7 @@
+ };
+ 
+ Values& Get();
++void ResetAdvancedGraphics();
+ /// Zero-based pass index. Pass 1 always uses main settings; others inherit unless customized.
+ DlssNrTuning DlssNrPassTuning(const Values& values, int pass);
+ /// Factory value for every float slider in the overlay, independent of saved user values.
+diff --git a/gpu/shim/engine/auto_exposure.cpp b/gpu/shim/engine/auto_exposure.cpp
+--- a/gpu/shim/engine/auto_exposure.cpp
++++ b/gpu/shim/engine/auto_exposure.cpp
+@@ -121,7 +121,7 @@
+     std::scoped_lock lock(g_mutex);
+     RestorePost();
+     int authored = 0;
+-    if (!BbSettings::Get().graphics_auto_exposure.load(std::memory_order_relaxed)) {
++    if (!(BbSettings::Get().graphics_advanced_enabled.load(std::memory_order_relaxed) && BbSettings::Get().graphics_auto_exposure.load(std::memory_order_relaxed))) {
+         Stop(Status::Off);
+         return 0;
+     }
+@@ -171,7 +171,7 @@
+         baseline = g_authored_baseline;
+         std::memcpy(const_cast<std::uint8_t*>(SavedContextXmm(saved, 0)), &baseline, sizeof baseline);
+     }
+-    if (!BbSettings::Get().graphics_auto_exposure.load(std::memory_order_relaxed)) {
++    if (!(BbSettings::Get().graphics_advanced_enabled.load(std::memory_order_relaxed) && BbSettings::Get().graphics_auto_exposure.load(std::memory_order_relaxed))) {
+         Stop(Status::Off);
+         return 0;
+     }
+@@ -233,14 +233,16 @@
+         Write(native.record + 0x4c, 0.0f);
+         Write(native.record + 0x54, baseline);
+     }
+-    std::memcpy(const_cast<std::uint8_t*>(SavedContextXmm(saved, 0)), &result.exposure, sizeof(float));
++    const float strength=std::clamp(BbSettings::Get().graphics_exposure_strength.load(),0.0f,1.0f);
++    const float applied=strength>=1.0f ? result.exposure : strength<=0.0f ? baseline : baseline*std::exp2(std::log2(result.exposure/baseline)*strength);
++    std::memcpy(const_cast<std::uint8_t*>(SavedContextXmm(saved, 0)), &applied, sizeof(float));
+     // Match the native adapted branch's post writeback, not just its tone-setter
+     // argument. Other render consumers must see the same applied exposure.
+     g_post_baseline = baseline;
+-    g_post_applied = result.exposure;
+-    Write(g_image + kPost + 0x98, result.exposure);
++    g_post_applied = applied;
++    Write(g_image + kPost + 0x98, applied);
+     g_post_owned = true;
+-    Publish(result.status, std::log2(result.exposure / baseline));
++    Publish(result.status, std::log2(applied / baseline));
+     return 0;
+ }
+ }
+diff --git a/gpu/shim/engine/native_sss.cpp b/gpu/shim/engine/native_sss.cpp
+--- a/gpu/shim/engine/native_sss.cpp
++++ b/gpu/shim/engine/native_sss.cpp
+@@ -89,7 +89,7 @@
+ 
+ void BeforeRender(std::uint64_t context) {
+     if (!g_image) return;
+-    const bool enabled = BbSettings::Get().graphics_native_sss.load(std::memory_order_relaxed);
++    const bool enabled = (BbSettings::Get().graphics_advanced_enabled.load(std::memory_order_relaxed) && BbSettings::Get().graphics_native_sss.load(std::memory_order_relaxed));
+     if (!enabled && NothingToRelease()) return;
+     std::scoped_lock lock(g_mutex);
+     if (!enabled) {
+@@ -156,7 +156,7 @@
+     return true;
+ }
+ void Tick() {
+-    if (!g_image || BbSettings::Get().graphics_native_sss.load(std::memory_order_relaxed) ||
++    if (!g_image || (BbSettings::Get().graphics_advanced_enabled.load(std::memory_order_relaxed) && BbSettings::Get().graphics_native_sss.load(std::memory_order_relaxed)) ||
+         NothingToRelease()) return;
+     std::scoped_lock lock(g_mutex);
+     Restore();
+diff --git a/tests/test_bloom_lifecycle.cpp b/tests/test_bloom_lifecycle.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/test_bloom_lifecycle.cpp
+@@ -0,0 +1,16 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#include "../gpu/shadps4/video_core/renderer_vulkan/bloom_frame_state.h"
++#include <cassert>
++int main() {
++    Vulkan::BloomFrameState bloom;
++    assert(!bloom.Ready() && !bloom.Consume(true));
++    bloom.SetEnabled(true);bloom.Generated();
++    bloom.SetEnabled(true); // display settings latch must not discard this frame's producer
++    assert(bloom.Ready() && bloom.Consume(true));
++    assert(bloom.Status()==2 && !bloom.Consume(true));
++    bloom.Discard(); assert(!bloom.Ready());
++    bloom.Generated();bloom.Discard();assert(!bloom.Consume(true)); // no stale frame
++    bloom.Generated();assert(!bloom.Consume(false) && bloom.Status()==3);
++    bloom.Generated();bloom.SetEnabled(false);assert(!bloom.Consume(true) && bloom.Status()==0);
++    bloom.SetEnabled(true);assert(!bloom.Ready());bloom.Generated();assert(bloom.Consume(true));
++}
+diff --git a/tests/test_live_local_light.cpp b/tests/test_live_local_light.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/test_live_local_light.cpp
+@@ -0,0 +1,164 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#include <vulkan/vulkan.h>
++#include <array>
++#include <bit>
++#include <cassert>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <fstream>
++#include <vector>
++#include "video_core/host_shaders/local_light_test_comp.h"
++#include "../gpu/shadps4/video_core/renderer_vulkan/vk_local_light_push.h"
++#include "../gpu/shadps4/video_core/renderer_vulkan/vk_local_falloff.h"
++#define CHECK(call) do { const auto status=(call); if(status!=VK_SUCCESS){std::fprintf(stderr,"%s: %d\n",#call,int(status));std::abort();} }while(false)
++int main(int argc,char** argv) {
++    std::vector<uint32_t> words(std::begin(LOCAL_LIGHT_TEST_COMP),std::end(LOCAL_LIGHT_TEST_COMP));
++    std::array<uint32_t,4> ids{};
++    constexpr std::array<float,4> magic{0.1111f,0.2222f,0.3333f,0.4444f};
++    for(size_t at=5;at<words.size();at+=words[at]>>16)
++        if((words[at]&65535)==43 && (words[at]>>16)==4)
++            for(size_t c=0;c<4;++c) if(words[at+3]==std::bit_cast<uint32_t>(magic[c])) ids[c]=words[at+2];
++    for(auto id:ids) assert(id);
++    assert(Vulkan::LocalLightPush::Convert(words,ids));
++    if(argc>1) { std::ofstream out(argv[1],std::ios::binary);out.write(reinterpret_cast<const char*>(words.data()),words.size()*4); }
++    VkInstance instance;
++    const VkApplicationInfo app{.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
++        .pApplicationName = "sky-seam-test", .apiVersion = VK_API_VERSION_1_3};
++    const VkInstanceCreateInfo ci{.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
++        .pApplicationInfo = &app};
++    CHECK(vkCreateInstance(&ci, nullptr, &instance));
++    unsigned count = 0;
++    CHECK(vkEnumeratePhysicalDevices(instance, &count, nullptr));
++    assert(count);
++    std::vector<VkPhysicalDevice> devices(count);
++    CHECK(vkEnumeratePhysicalDevices(instance, &count, devices.data()));
++    const auto gpu = devices[0];
++    unsigned family_count = 0, family = 0;
++    vkGetPhysicalDeviceQueueFamilyProperties(gpu, &family_count, nullptr);
++    std::vector<VkQueueFamilyProperties> families(family_count);
++    vkGetPhysicalDeviceQueueFamilyProperties(gpu, &family_count, families.data());
++    while (family < family_count && !(families[family].queueFlags & VK_QUEUE_COMPUTE_BIT)) ++family;
++    assert(family < family_count);
++    const float priority = 1;
++    const VkDeviceQueueCreateInfo qi{.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
++        .queueFamilyIndex = family, .queueCount = 1, .pQueuePriorities = &priority};
++    const VkDeviceCreateInfo di{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
++        .queueCreateInfoCount = 1, .pQueueCreateInfos = &qi};
++    VkDevice device;
++    CHECK(vkCreateDevice(gpu, &di, nullptr, &device));
++    VkQueue queue;
++    vkGetDeviceQueue(device, family, 0, &queue);
++    const VkBufferCreateInfo bi{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
++        .size = 65536, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT};
++    VkBuffer buffer;
++    CHECK(vkCreateBuffer(device, &bi, nullptr, &buffer));
++    VkMemoryRequirements req;
++    vkGetBufferMemoryRequirements(device, buffer, &req);
++    VkPhysicalDeviceMemoryProperties properties;
++    vkGetPhysicalDeviceMemoryProperties(gpu, &properties);
++    unsigned type = 0;
++    const auto flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
++    while (type < properties.memoryTypeCount && (!(req.memoryTypeBits & (1u << type)) ||
++           (properties.memoryTypes[type].propertyFlags & flags) != flags)) ++type;
++    assert(type < properties.memoryTypeCount);
++    const VkMemoryAllocateInfo ai{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
++        .allocationSize = req.size, .memoryTypeIndex = type};
++    VkDeviceMemory memory;
++    CHECK(vkAllocateMemory(device, &ai, nullptr, &memory));
++    CHECK(vkBindBufferMemory(device, buffer, memory, 0));
++    void* mapped;
++    CHECK(vkMapMemory(device, memory, 0, VK_WHOLE_SIZE, 0, &mapped));
++    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
++    for (unsigned i = 0; i < 3; ++i) bindings[i] =
++        {i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
++    const VkDescriptorSetLayoutCreateInfo si{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
++        .bindingCount = 3, .pBindings = bindings.data()};
++    VkDescriptorSetLayout set_layout;
++    CHECK(vkCreateDescriptorSetLayout(device, &si, nullptr, &set_layout));
++    const VkDescriptorPoolSize pool_size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3};
++    const VkDescriptorPoolCreateInfo dpi{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
++        .maxSets = 1, .poolSizeCount = 1, .pPoolSizes = &pool_size};
++    VkDescriptorPool descriptors;
++    CHECK(vkCreateDescriptorPool(device, &dpi, nullptr, &descriptors));
++    const VkDescriptorSetAllocateInfo sai{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
++        .descriptorPool = descriptors, .descriptorSetCount = 1, .pSetLayouts = &set_layout};
++    VkDescriptorSet set;
++    CHECK(vkAllocateDescriptorSets(device, &sai, &set));
++    const std::array<VkDescriptorBufferInfo, 3> infos{
++        VkDescriptorBufferInfo{buffer, 0, 49152}, {buffer, 0, 49152}, {buffer, 49152, 1826 * 4}};
++    std::array<VkWriteDescriptorSet, 3> writes{};
++    for (unsigned i = 0; i < 3; ++i) writes[i] =
++        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = i,
++         .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
++         .pBufferInfo = &infos[i]};
++    vkUpdateDescriptorSets(device, 3, writes.data(), 0, nullptr);
++    const VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0, 144};
++    const VkPipelineLayoutCreateInfo li{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
++        .setLayoutCount = 1, .pSetLayouts = &set_layout, .pushConstantRangeCount = 1,
++        .pPushConstantRanges = &range};
++    VkPipelineLayout layout;
++    CHECK(vkCreatePipelineLayout(device, &li, nullptr, &layout));
++    const VkShaderModuleCreateInfo mi{.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
++        .codeSize = words.size()*4, .pCode = words.data()};
++    VkShaderModule module;
++    CHECK(vkCreateShaderModule(device, &mi, nullptr, &module));
++    const VkComputePipelineCreateInfo pc{.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
++        .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
++                  .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = module, .pName = "main"},
++        .layout = layout};
++    VkPipeline pipeline;
++    CHECK(vkCreateComputePipelines(device, {}, 1, &pc, nullptr, &pipeline));
++    const VkCommandPoolCreateInfo pi{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
++        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = family};
++    VkCommandPool pool;
++    CHECK(vkCreateCommandPool(device, &pi, nullptr, &pool));
++    const VkCommandBufferAllocateInfo cai{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
++        .commandPool = pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1};
++    VkCommandBuffer cmd;
++    CHECK(vkAllocateCommandBuffers(device, &cai, &cmd));
++
++    const std::array<std::array<float,3>,4> tuning{{{1,.05f,1},{2,.05f,4},{1,.4f,8},{1,.05f,1}}};
++    float baseline=0;
++    for(size_t test=0;test<tuning.size();++test) {
++        const auto [intensity,core,sharpness]=tuning[test];
++        const float energy=intensity*Vulkan::LocalFalloff::EnergyScale(core);
++        const float core2=core*core,edge=1.0f/(1+core2),cap=0.01000213623046875f/sharpness;
++        std::array<uint32_t,36> params{}; params[31]=400;
++        params[32]=std::bit_cast<uint32_t>(energy);params[33]=std::bit_cast<uint32_t>(core2);
++        params[34]=std::bit_cast<uint32_t>(edge);params[35]=std::bit_cast<uint32_t>(cap);
++        CHECK(vkResetCommandBuffer(cmd,0));
++        const VkCommandBufferBeginInfo begin{.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
++        CHECK(vkBeginCommandBuffer(cmd,&begin));
++        vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,pipeline);
++        vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,layout,0,1,&set,0,nullptr);
++        vkCmdPushConstants(cmd,layout,VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof(params),params.data());
++        vkCmdDispatch(cmd,1,1,1);
++        const VkMemoryBarrier barrier{.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER,.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT,.dstAccessMask=VK_ACCESS_HOST_READ_BIT};
++        vkCmdPipelineBarrier(cmd,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,1,&barrier,0,nullptr,0,nullptr);
++        CHECK(vkEndCommandBuffer(cmd));
++        const VkSubmitInfo submit{.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,.commandBufferCount=1,.pCommandBuffers=&cmd};
++        CHECK(vkQueueSubmit(queue,1,&submit,{}));CHECK(vkQueueWaitIdle(queue));
++        const auto* output=reinterpret_cast<const float*>(static_cast<const char*>(mapped)+49152);
++        const float expected=std::max(0.0f,1.0f/(.04f+core2)-edge)*energy;
++        assert(std::abs(output[0]-expected)<0.0001f);
++        assert(std::abs(output[1]-cap)<0.000001f);
++        if(test==0)baseline=output[0];
++        if(test==1)assert(std::abs(output[0]-2*baseline)<0.0001f);
++        if(test==2)assert(output[0]!=baseline);
++        if(test==3)assert(output[0]==baseline);
++    }
++    vkDestroyCommandPool(device, pool, nullptr);
++    vkDestroyPipeline(device, pipeline, nullptr);
++    vkDestroyShaderModule(device, module, nullptr);
++    vkDestroyPipelineLayout(device, layout, nullptr);
++    vkDestroyDescriptorPool(device, descriptors, nullptr);
++    vkDestroyDescriptorSetLayout(device, set_layout, nullptr);
++    vkUnmapMemory(device, memory);
++    vkDestroyBuffer(device, buffer, nullptr);
++    vkFreeMemory(device, memory, nullptr);
++    vkDestroyDevice(device, nullptr);
++    vkDestroyInstance(instance, nullptr);
++    std::puts("PASS: live local-light intensity/source-size/sharpness and restoration on one unchanged GPU pipeline");
++}
+diff --git a/tests/test_local_falloff.cpp b/tests/test_local_falloff.cpp
+--- a/tests/test_local_falloff.cpp
++++ b/tests/test_local_falloff.cpp
+@@ -1,6 +1,8 @@
+ // SPDX-License-Identifier: GPL-3.0-or-later
+ #include "../gpu/shadps4/video_core/renderer_vulkan/vk_local_falloff.h"
+ #include <cassert>
++#include "../gpu/shadps4/video_core/renderer_vulkan/vk_local_light_push.h"
++#include "../gpu/shadps4/video_core/renderer_vulkan/vk_ggx_lobes.h"
+ #include <filesystem>
+ #include <fstream>
+ #include <iostream>
+@@ -66,6 +68,12 @@
+             ++shaders;
+             total.standard += stats.standard;
+             total.special += stats.special;
++            auto live=words;
++            const auto sharp_id=live[3];
++            const auto sharp_sites=Vulkan::GgxLobes::ScaleLightSharpness(live,2.0f);
++            assert(Vulkan::LocalLightPush::Convert(live,{stats.parameters[0],stats.parameters[1],stats.parameters[2],sharp_sites?sharp_id:0}));
++            std::ofstream live_file(out / (stem+"-live.spv"),std::ios::binary);
++            live_file.write(reinterpret_cast<const char*>(live.data()),std::streamsize(live.size()*4));
+             const auto patched = words;
+             assert(!Patch(words, hash).Changed() && words == patched);
+             std::ofstream file(out / entry.path().filename(), std::ios::binary);
+diff --git a/tests/test_motion_blur.cpp b/tests/test_motion_blur.cpp
+--- a/tests/test_motion_blur.cpp
++++ b/tests/test_motion_blur.cpp
+@@ -82,7 +82,7 @@
+     auto descriptors = device.createDescriptorSetLayoutUnique({
+         .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
+         .bindingCount = u32(bindings.size()), .pBindings = bindings.data()},nullptr,d).value;
+-    const vk::PushConstantRange push{vk::ShaderStageFlagBits::eCompute,0,4};
++    const vk::PushConstantRange push{vk::ShaderStageFlagBits::eCompute,0,8};
+     auto layout = device.createPipelineLayoutUnique({.setLayoutCount = 1,
+         .pSetLayouts = &*descriptors, .pushConstantRangeCount = 1,
+         .pPushConstantRanges = &push},nullptr,d).value;
+@@ -128,7 +128,7 @@
+             .dstStageMask = dst, .dstAccessMask = dst_access};
+         cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &b},d);
+     };
+-    const auto run = [&](u32 quality) {
++    const auto run = [&](u32 quality,float strength=1.0f) {
+         std::memcpy(mapped[0],color.data(),Bytes);
+         std::memcpy(static_cast<char*>(mapped[0]) + Bytes,velocity.data(),Bytes);
+         auto cmd = command;
+@@ -172,7 +172,8 @@
+         }
+         cmd.bindPipeline(vk::PipelineBindPoint::eCompute,*pipeline,d);
+         cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute,*layout,0,writes,d);
+-        cmd.pushConstants(*layout,vk::ShaderStageFlagBits::eCompute,0,4,&quality,d);
++        const struct { u32 quality;float strength; } params{quality,strength};
++        cmd.pushConstants(*layout,vk::ShaderStageFlagBits::eCompute,0,sizeof(params),&params,d);
+         cmd.dispatch((W+7)/8,(H+7)/8,1,d);
+         barrier(cmd,vk::PipelineStageFlagBits2::eComputeShader,vk::AccessFlagBits2::eShaderWrite,
+             vk::PipelineStageFlagBits2::eTransfer,vk::AccessFlagBits2::eTransferRead);
+@@ -202,12 +203,17 @@
+     }
+     for (auto& v : velocity) v = {0.5f,0.5f,0,0};
+     assert(run(1) == color);
++    assert(run(1,0)==color && run(1,0.5f)==color);
+     for (auto& v : velocity) v = {1,0.5f,0,0};
+ 
+     for (u32 y = 0; y < H; ++y) for (u32 x = 0; x < W; ++x)
+         color[y*W+x] = {x == W/2 ? 8.0f : 0.0f,0,0,0.5f};
+     const auto stock = run(0);
+     const auto high = run(1);
++    const auto neutral=run(1,0);assert(neutral==color);
++    const auto half=run(1,0.5f);
++    for(u32 i=0;i<N;++i) for(u32 c=0;c<4;++c) assert(std::abs(half[i][c]-(high[i][c]+neutral[i][c])*0.5f)<0.0001f);
++    assert(run(1,1)==high);
+     double stock_error = 0, high_error = 0;
+     for (u32 x = 16; x < W-16; ++x) {
+         const float expected = std::abs(int(x) - int(W/2)) <= 8 ? 8.0f/17 : 0;
+diff --git a/tests/test_native_exposure.cpp b/tests/test_native_exposure.cpp
+--- a/tests/test_native_exposure.cpp
++++ b/tests/test_native_exposure.cpp
+@@ -149,6 +149,12 @@
+     Put(record.data(), 0x54, 100.0f);
+     assert(std::abs(std::log2(Tone(12) / 3) - 0.5f) < 1e-6);
+     assert(Get<float>(image.data(), 0x5540778) == Get<float>(record.data(), 0x28));
++    BbSettings::Get().graphics_exposure_strength=0.5f;
++    assert(std::abs(std::log2(Tone(12) / 3) - 0.25f) < 1e-6);
++    BbSettings::Get().graphics_exposure_strength=0.0f;
++    assert(Tone(12)==3);
++    BbSettings::Get().graphics_exposure_strength=1.0f;
++    Tone(12);
+     const float applied = Get<float>(image.data(), 0x5540778);
+     const float learned_gray = Get<float>(record.data(), 4);
+     assert(Tone(12, applied) == applied);
+diff --git a/tests/test_native_sss.cpp b/tests/test_native_sss.cpp
+--- a/tests/test_native_sss.cpp
++++ b/tests/test_native_sss.cpp
+@@ -105,4 +105,11 @@
+     BbSettings::Get().graphics_native_sss = false;
+     Render(view);
+     assert(view[enable] == 0 && image[disable] == 0);
++    Init(view);image[disable]=1;
++    BbSettings::Get().graphics_native_sss=true;Render(view);
++    assert(view[enable]==1);
++    BbSettings::Get().graphics_advanced_enabled=false;Tick();
++    assert(view[enable]==0 && image[disable]==1);
++    BbSettings::Get().graphics_advanced_enabled=true;Render(view);
++    assert(view[enable]==1);
+ }
+diff --git a/tests/test_preset_ui.cpp b/tests/test_preset_ui.cpp
+--- a/tests/test_preset_ui.cpp
++++ b/tests/test_preset_ui.cpp
+@@ -25,7 +25,7 @@
+ std::optional<BbSettings::PresetDocument> custom_apply_request;
+ bool custom_import_request=false;
+ enum {TabUpscaling,TabNeuralRendering,TabDisplay,TabPicture,TabGameplay,TabInterface,TabSpecPreset};
+-const char* TabTitle(int group) {static const char* titles[]={"Upscaling","NR","Display","Picture","Gameplay","Interface"};return titles[group];}
++const char* TabTitle(int group) {static const char* titles[]={"Upscaling","Neural Rendering","Display","Picture","Gameplay","Interface"};return titles[group];}
+ void Section(const char*) {} bool Shown(const char*) {return true;}
+ #include "gpu/shim/bbport_preset_reference.inc"
+ ImVec2 sharpness_position;
+@@ -81,7 +81,7 @@
+ void Frame() {
+     ImGui::NewFrame();
+     ImGui::SetNextWindowSize(ImVec2(950,900)); ImGui::Begin("Test host");
+-    CustomPresetDialogs(); ImGui::End(); ImGui::Render();
++    CustomPresetSection(); CustomPresetDialogs(); ImGui::End(); ImGui::Render();
+ }
+ int main(int argc,char** argv) {
+     const auto temporary=std::filesystem::temp_directory_path()/("preset-ui-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+@@ -126,6 +126,37 @@
+     io.AddMouseWheelEvent(0,-12);Frame();Frame();
+     assert(child->Scroll.y>0 && child->ParentWindow->Scroll.y==0 && child->ParentWindow->Pos.y==header_y);
+     assert(BbSettings::Get().sharpness==1.41f && BbSettings::Get().jitter);
++
++    const auto click_control=[&](const std::string& key) {
++        const auto r=preset_test_hit_rects.at(key);
++        io.AddMousePosEvent((r.x+r.z)*0.5f,(r.y+r.w)*0.5f);Frame();
++        io.AddMouseButtonEvent(0,true);Frame();io.AddMouseButtonEvent(0,false);Frame();Frame();
++    };
++    click_control("editor_cancel");
++    std::string error;BbSettings::PresetDocument original{"My scope",{{"sharpness","0.50"}}};
++    assert(BbSettings::SaveCustomPreset(original,error));original.name="Second scope";
++    assert(BbSettings::SaveCustomPreset(original,error));
++    auto owned=BbSettings::ListCustomPresets(error);assert(owned.size()==2);
++    custom_presets_dirty=true;Frame();Frame();
++    const auto live_before=BbSettings::SnapshotSettings(BbSettings::Get());
++    // The per-row action captures current values while retaining the preset's selected key set.
++    click_control("overwrite:"+PathUtf8(owned[0].path));
++    assert(custom_save_target==owned[0].path && SelectedPresetDocument().settings.size()==1);
++    click_control("save_preset");click_control("cancel_overwrite");
++    BbSettings::PresetDocument actual;assert(BbSettings::ReadPreset(owned[0].path,actual,error) && actual.settings[0].second=="0.50");
++    click_control("save_preset");click_control("confirm_overwrite");
++    assert(BbSettings::ReadPreset(owned[0].path,actual,error) && actual.settings.size()==1 && actual.settings[0].second=="1.41");
++    assert(BbSettings::ListCustomPresets(error).size()==2 && BbSettings::SnapshotSettings(BbSettings::Get())==live_before);
++    // Save current can explicitly target another owned entry; no duplicate is created.
++    click_control("save_current_open");assert(custom_save_target.empty());
++    click_control("save_target");click_control("target:"+PathUtf8(owned[1].path));
++    assert(custom_save_target==owned[1].path);
++    click_control("save_preset");click_control("confirm_overwrite");
++    assert(BbSettings::ReadPreset(owned[1].path,actual,error));
++    const auto found=std::find_if(actual.settings.begin(),actual.settings.end(),[](const auto& entry){return entry.first=="sharpness";});
++    assert(found!=actual.settings.end() && found->second=="1.41");
++    assert(BbSettings::ListCustomPresets(error).size()==2 && BbSettings::SnapshotSettings(BbSettings::Get())==live_before);
++    std::puts("PASS: custom preset row overwrite, confirmation/cancel, Save-current target selection, stable paths, scoped selection and unchanged live settings");
+     ImGui::DestroyContext();
+     std::filesystem::remove_all(temporary);
+     std::puts("PASS: preset reference UI: exclusion click, fallback-row toggle, whole-group toggle, snapshot isolation, graphical defaults and fixed header while scrolling");
+diff --git a/tests/test_settings.cpp b/tests/test_settings.cpp
+--- a/tests/test_settings.cpp
++++ b/tests/test_settings.cpp
+@@ -52,6 +52,21 @@
+     assert(!BbSettings::ApplyPreset(dof_preset,dof_error));
+     s.graphics_dof_intensity=1.0f;
+     assert(BbSettings::Save()); BbSettings::Load(); assert(s.startup_dof_mode==0);
++    s.graphics_exposure_strength=0.375f;s.graphics_motion_blur_strength=0.25f;
++    s.graphics_sky_smoothing_strength=0.75f;s.graphics_pcss_softness=1.25f;s.graphics_shadow_filter_strength=0.5f;
++    assert(BbSettings::Save());BbSettings::Load();
++    assert(s.graphics_exposure_strength==0.375f && s.graphics_motion_blur_strength==0.25f);
++    assert(s.graphics_sky_smoothing_strength==0.75f && s.graphics_pcss_softness==1.25f && s.graphics_shadow_filter_strength==0.5f);
++    assert(s.graphics_advanced_enabled);
++    s.graphics_advanced_enabled=false;s.graphics_local_ggx=true;
++    assert(BbSettings::Save());BbSettings::Load();
++    assert(!s.graphics_advanced_enabled && s.graphics_local_ggx);
++    const bool saved_gi=s.graphics_ssgi;const float saved_nr=s.dlss_nr_intensity;
++    BbSettings::ResetAdvancedGraphics();
++    assert(s.graphics_advanced_enabled && !s.graphics_local_ggx && s.graphics_light_intensity==1 && s.graphics_light_core==0.05f);
++    assert(s.graphics_ssgi==saved_gi && s.dlss_nr_intensity==saved_nr);
++    assert(s.graphics_exposure_strength==1 && s.graphics_motion_blur_strength==1 && s.graphics_sky_smoothing_strength==1);
++    assert(s.graphics_pcss_softness==1.25f && s.graphics_shadow_filter_strength==0.5f); // Tier 1 preserved
+     assert(!s.graphics_smooth_normals && !s.graphics_auto_exposure && !s.graphics_native_sss);
+     assert(s.graphics_ggx_mode==0 && s.graphics_tonemapper==0 && s.graphics_bloom_quality==0);
+     s.graphics_smooth_normals=true; s.graphics_auto_exposure=true; s.graphics_native_sss=true;
+@@ -624,12 +639,24 @@
+     assert(BbSettings::SaveCustomPreset(partial,error)); // duplicate display names never overwrite
+     auto records=BbSettings::ListCustomPresets(error); assert(error.empty() && records.size()==2);
+     assert(records[0].path!=records[1].path);
++    const auto before_overwrite=BbSettings::SnapshotSettings(s);
++    auto replacement=partial;replacement.name="Updated custom";replacement.settings={{"sharpness","1.25"}};
++    assert(BbSettings::OverwriteCustomPreset(records[0].path,replacement,error));
++    assert(BbSettings::ListCustomPresets(error).size()==2);
++    assert(BbSettings::ReadPreset(records[0].path,decoded,error) && decoded.name==replacement.name && decoded.settings==replacement.settings);
++    auto invalid_replacement=replacement;invalid_replacement.settings.push_back({"unknown_option","1"});
++    assert(!BbSettings::OverwriteCustomPreset(records[0].path,invalid_replacement,error));
++    assert(BbSettings::ReadPreset(records[0].path,decoded,error) && decoded.settings==replacement.settings);
++    assert(!BbSettings::OverwriteCustomPreset(BbSettings::CustomPresetDirectory()/"missing.bbxpreset",replacement,error));
++    assert(BbSettings::SnapshotSettings(s)==before_overwrite);
++
+     const auto export_path=library_root/"selective.bbxpreset";
+     assert(BbSettings::WritePreset(export_path,partial,false,error));
+     assert(!BbSettings::WritePreset(export_path,partial,false,error));
+     assert(BbSettings::WritePreset(export_path,partial,true,error));
+     assert(BbSettings::ReadPreset(export_path,decoded,error) && decoded.settings==partial.settings);
+     assert(!BbSettings::WritePreset(library_root/"lantern.ini",partial,true,error));
++    assert(!BbSettings::OverwriteCustomPreset(export_path,replacement,error)); // external files and built-ins never become library targets
+     assert(!BbSettings::DeleteCustomPreset(export_path,error)); // cannot delete external export
+     assert(BbSettings::DeleteCustomPreset(records[0].path,error));
+     assert(BbSettings::ListCustomPresets(error).size()==1);
+diff --git a/tests/test_sky_zenith.cpp b/tests/test_sky_zenith.cpp
+--- a/tests/test_sky_zenith.cpp
++++ b/tests/test_sky_zenith.cpp
+@@ -147,7 +147,7 @@
+          .pImageInfo = i < 3 ? &image_infos[i] : nullptr,
+          .pBufferInfo = i >= 3 ? &buffer_infos[i - 3] : nullptr};
+     vkUpdateDescriptorSets(device, 5, writes.data(), 0, nullptr);
+-    const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 12};
++    const VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 16};
+     const VkPipelineLayoutCreateInfo li{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+         .setLayoutCount = 1, .pSetLayouts = &set_layout, .pushConstantRangeCount = 1,
+         .pPushConstantRanges = &push};
+@@ -181,7 +181,7 @@
+     auto download = upload;
+     download.bufferOffset = InputBytes;
+     std::vector<unsigned short> baseline(W * H * 4);
+-    for (unsigned test = 0; test < 5; ++test) {
++    for (unsigned test = 0; test < 6; ++test) {
+         std::memcpy(mapped, source.data(), source.size());
+         if (test == 2) static_cast<unsigned char*>(mapped)[0] = 255;
+         auto* geometry = reinterpret_cast<unsigned*>(static_cast<char*>(mapped) + GeometryOffset);
+@@ -203,8 +203,8 @@
+                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
+         }
+         vkCmdCopyBufferToImage(cmd, buffer, images[0], VK_IMAGE_LAYOUT_GENERAL, 1, &upload);
+-        struct Params { unsigned mip, count, force; };
+-        const Params params{0, 1824, test == 4 ? 0u : 1u};
++        struct Params { unsigned mip, count, force; float strength; };
++        const Params params{0, 1824, test == 4 ? 0u : 1u, test==5 ? 0.0f : 1.0f};
+         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, nullptr);
+         vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(params), &params);
+         for (unsigned i = 0; i < 3; ++i) {
+@@ -235,7 +235,7 @@
+         const auto* validation_words = reinterpret_cast<const unsigned*>(
+             static_cast<char*>(mapped) + ValidationOffset);
+         const auto verified = validation_words[0];
+-        assert(verified == unsigned(matched));
++        assert(verified == unsigned(matched || test==5));
+         assert(validation_words[1] == verified);
+         // Test 4 repeats test 3's inputs without forcing: nothing is left to dispatch.
+         for (unsigned mip = 0; mip < 12; ++mip) {

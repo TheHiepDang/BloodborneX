@@ -1,0 +1,197 @@
+{
+  "description": "Picture controls and live light/bloom fixes after tier2-batch; rc7 in-place revision.",
+  "bloodbornex_commit": "e0f47880f1c88a31b7288ce852d9ce4e88dc90e9",
+  "prerequisite": "tier2-batch",
+  "files": [
+    {
+      "path": "gpu/CMakeLists.txt",
+      "baseline_sha256": "ad86252549340748367055be2b9be54462e6edbfe006e0de2227ba7870475b3e",
+      "modified_sha256": "d77c347962d7a2bb4beff6ec1ac03c02c644829947a62a65e4d0451266d374a0"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/local_light_test.comp",
+      "baseline_sha256": null,
+      "modified_sha256": "3faaf845db6906987e09f0ed831a698eda20e7b688c5f7d8cd5913bea73b990d"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/native_motion_blur.frag",
+      "baseline_sha256": "2aa787e241779b69836bde26d35302f26c2ad5c9ca6036dbf76a128a490fa54a",
+      "modified_sha256": "95220fa6c27b3ab487d449a2701955afb83aa7f17836e6250865409734659b64"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/native_motion_blur.glsl",
+      "baseline_sha256": "313a33776f9c0582fedc4eb700b8a336a276d0292cee72c67774a2e332f53776",
+      "modified_sha256": "55aae991fc3197df7abc4d02567664a275cd0e483d2d7fa505c5e60e962c3497"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/native_motion_blur_test.comp",
+      "baseline_sha256": "049e991a94042964b026c771aa4d0d0078574a7d8635c9ebb639191a2a665d07",
+      "modified_sha256": "d4588afcba6e3a3bcd73cdf46241302999d3e583eb1d9dacbdea1f623225d39e"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/sky_zenith.comp",
+      "baseline_sha256": "0f41b3dc06b691412f2fb11216495b20d8c909decdc7ea3446177e074429cbcc",
+      "modified_sha256": "ad041421beecc82e37153a30004a481f7a963c268af69ec729f6bd060fc38c4d"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/bloom_frame_state.h",
+      "baseline_sha256": null,
+      "modified_sha256": "98a03d19d477f3c3df7b9a97c3bd6a1ee9558e69491d22390c8e9b0c44eaef67"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_contact_shadow.cpp",
+      "baseline_sha256": "01ab4390194f7e0b4e3ba63a616fdafc73bff41cd7cf62c342015ebff875e8ce",
+      "modified_sha256": "f04c59c6b7c16f81f1adec8bbe14a92ae9cef2dd939c9fbc0281fd8a473d0dfa"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.cpp",
+      "baseline_sha256": "fac4e69ce8f0415ebb05d4f1cde5001402ae3def95dcacad8e0eba9ad9802a5b",
+      "modified_sha256": "249dbf18306ae54fbb24d5ff7c0019227257c3519490a32dcde41e17c0828528"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_froyok_bloom.cpp",
+      "baseline_sha256": "06f1b867ea9319bc0a571797511d0e87ea3ed47ccfbb76d564b8bee990c44967",
+      "modified_sha256": "eb52d9f8f6317bb3675c9fec0e4381da2994d4e8dbc11bd895bd73d7033be353"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_froyok_bloom.h",
+      "baseline_sha256": "3de82241c1d3b73fb955c9eaeef84178d88d12ab9222706a33a5fbf140f20cec",
+      "modified_sha256": "a3f45c0f52c54dc655e7ac40d3d41737296bff017be407aab137f1631ffa15e8"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_graphics_pipeline.cpp",
+      "baseline_sha256": "37b4aae1a4aef2df2b61f6b8a0c5dc828c9cb6a6f6afec6f23893f6400265063",
+      "modified_sha256": "ef7a79db5dbade8c5d9c3452e8ab0f6e63db9bd55ba281b546df848698a0af96"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_local_falloff.h",
+      "baseline_sha256": "39fdb81b7f7ac9c737592f2cf99de3863121bd4f157a650164e48babc1841a44",
+      "modified_sha256": "ff69700b03476fca583fae85de6bfd2858bfd10201295d59ea21fe988cd5c681"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_local_light_push.h",
+      "baseline_sha256": null,
+      "modified_sha256": "a7f5fb602879ae60b80b93b20e3651ffdc36c8f93a6db9cc901686efdc629442"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_common.cpp",
+      "baseline_sha256": "d5fdf4fc4834285ab730deb8e26294fe3f91380eb3580bff4d9e388b73f5a41f",
+      "modified_sha256": "62dfbf64c6f01e12e4174c1d1c5ad664d12f7d6ac67ecca652409c9580021c6e"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_common.h",
+      "baseline_sha256": "48eaf5e86a35c7903f753fc9ad1c933c87a9446444898a049556b65e1f4987ce",
+      "modified_sha256": "9b50ecbfbdd1446e472d9cd20e7df8a67e0715dcab362136026ed9ade21e8f62"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp",
+      "baseline_sha256": "7ca9d696df51d1dadd037e7f324343a93c6a8f89cf17def3a243e14b5d074ef0",
+      "modified_sha256": "b6dc76186ddbd2fe9554d692620656f54e7792379390c002df08318b8731b3fb"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_sky_zenith.cpp",
+      "baseline_sha256": "6ffa44eab30fed82c834b7ca8b78f297229495f9d6b10b8f668b02a584ebeaca",
+      "modified_sha256": "7e75bc11a8e314a1006168477aae0ce5b43522b9376a5b1d3ad9dc2a606f6ea3"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_sky_zenith.h",
+      "baseline_sha256": "aa04c48b45750ec86eac9d15f02dc4e8c5051df35af8f75203b4072dcc8df9bc",
+      "modified_sha256": "15f53140e12fbc80ffe6d6e97f6ad3f8069d8010fbb98c2733f148a49cf66792"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc",
+      "baseline_sha256": "684014e34320feba8721b6fe0d5d965730a4f7ece02e7388c708c40923e11708",
+      "modified_sha256": "7eef0723dbaf317f806d2b81c67300671ff55de167eb4d32d24826f5851baec1"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_tier2_variants.h",
+      "baseline_sha256": "7bad8a4138751af83a850c5da44df0a2ee73c741b1a77f7bb3791dd98dae7621",
+      "modified_sha256": "b34148cc7a02d4d9dcee2930871c92313a2397eca4891146e80621f23cb669b9"
+    },
+    {
+      "path": "gpu/shim/bbport_custom_presets.h",
+      "baseline_sha256": "a4f42151a3d550fa7240d90222fa88279eb8737d31ff5d507574a00ac9523d55",
+      "modified_sha256": "17b1b59cb4055d5b62879a0e470c5b881c4e0cb4ceb5c5e55dd33c1a98ffbeac"
+    },
+    {
+      "path": "gpu/shim/bbport_custom_presets.inc",
+      "baseline_sha256": "57235e020a68afc44bf946751e3ff0e4bb23779bf2285bcfc065793096babd6a",
+      "modified_sha256": "7ba29fd192c50ffc3798cb5e16dc0e9f1e4e22439e78d14e7eef67ee354eb760"
+    },
+    {
+      "path": "gpu/shim/bbport_custom_presets_ui.inc",
+      "baseline_sha256": "183486a7c537a6c7eb7867f76ffbc72ab49e318c767f01375a452dce01a92666",
+      "modified_sha256": "d30c643cb7e65825e49aad7b36cb33f6a983b59679181f30bcb7d0bfecdcaaf2"
+    },
+    {
+      "path": "gpu/shim/bbport_overlay.cpp",
+      "baseline_sha256": "83bd117c84cba2e521ecbbaf842deabbb6e1fe29e6416ce755cfd9221e46de4e",
+      "modified_sha256": "b5311ff29adf425ee17dccfc29a1d89c151ce0c50dd42e34a9c446bcd6f6185f"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.cpp",
+      "baseline_sha256": "512b335368984b251b2c0b2482d1e2c7507d09c62862a9ced49e56cc1207e211",
+      "modified_sha256": "0a17190f4fe8383e32ff88220c835def02fb595cc07f569ff6b416387dc802e8"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.h",
+      "baseline_sha256": "0ff9c651489feea47f7fed3e10ea8e9c3232ca1f97df71a4e92036330301fca1",
+      "modified_sha256": "0fe4c8e6f7153b64c75cbfef2b8ef7aad40b5e49904e6430ff3917778920482e"
+    },
+    {
+      "path": "gpu/shim/engine/auto_exposure.cpp",
+      "baseline_sha256": "e0bdadb0341e1bec2e1b4b0060f5510daa8749ea9ce8dda2f502123620c8e2ae",
+      "modified_sha256": "7e20aa254dde8b315de27facdad9d9b62eac5acb40a59ea37897010b59897bbf"
+    },
+    {
+      "path": "gpu/shim/engine/native_sss.cpp",
+      "baseline_sha256": "083b5305d60e92e5e041ffb37ef65face214e108a419c533c577815fe9f3b14e",
+      "modified_sha256": "88be9e60992f9d27917662770561802e788963f077f433e813fce8dbf40811c0"
+    },
+    {
+      "path": "tests/test_bloom_lifecycle.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "d2f34f395777e3d7931a87499c528b43d7b3a4be57ac57e6641e6ea5c546ad16"
+    },
+    {
+      "path": "tests/test_live_local_light.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "94ea5da93ed882a5fbd7a5ad9d1ac02ca1e5c07a6b2dc20f641c8c618e5513df"
+    },
+    {
+      "path": "tests/test_local_falloff.cpp",
+      "baseline_sha256": "455bb8ad3cbb04064aa1151c7c05ccbd61e22a99dfeb9b928478bfd0b7329bf6",
+      "modified_sha256": "64d4064135cc2dc1e6b91d9247b0468c32e5300556cbeb7e25c78ebca2b1f5db"
+    },
+    {
+      "path": "tests/test_motion_blur.cpp",
+      "baseline_sha256": "fe1da5dde118b43d2851e67c74d2a8394a8cadbccf7ff9fdcaf3d3034ba0bfe4",
+      "modified_sha256": "48d2791bae5293cbc1864ebdeef9c81ef6542efa6fb36522cc9626ade5cccf5c"
+    },
+    {
+      "path": "tests/test_native_exposure.cpp",
+      "baseline_sha256": "9a6a3a65c8382bf1161ec59816a3c8f88276547216fde0020965924300249c3b",
+      "modified_sha256": "bae671f67b2fe69d559f9d0006f7a6481ed6d2964c1cd8b40f1fc411bc84b1d5"
+    },
+    {
+      "path": "tests/test_native_sss.cpp",
+      "baseline_sha256": "3ee1a4572facb25717d3f8d2f816dd081796a3cb7bf7974fa4015cda6ed78239",
+      "modified_sha256": "9437680b08d297303a169bea915ab25bacd92b0bbd59e13d93ed43637b87c520"
+    },
+    {
+      "path": "tests/test_preset_ui.cpp",
+      "baseline_sha256": "8d580dbaff0cb61f5d9b1de7261776cc5850d96b2fae19df88272ebf9ca54507",
+      "modified_sha256": "014f406680665345924835759e39d4896a779de81381d0bb2506f40b5c25e964"
+    },
+    {
+      "path": "tests/test_settings.cpp",
+      "baseline_sha256": "253360e873d8bd7db0bdd0f131f6347eae1716b2a0cb54dfc406402ad29fee98",
+      "modified_sha256": "9f44e700b7015877df42197b17516a0e7a387d921d5d26ff6095b09f51deff3a"
+    },
+    {
+      "path": "tests/test_sky_zenith.cpp",
+      "baseline_sha256": "0b88c7081eff5e981b118278b3606643a0be01ea904a9aac5126c39edd55d076",
+      "modified_sha256": "a3e6ae7d424e6d019b8bd3cad35cdfb30109ea773d38da233f3187371d945754"
+    }
+  ]
+}

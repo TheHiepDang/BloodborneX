@@ -1,0 +1,1883 @@
+diff --git a/gpu/CMakeLists.txt b/gpu/CMakeLists.txt
+--- a/gpu/CMakeLists.txt
++++ b/gpu/CMakeLists.txt
+@@ -207,6 +207,15 @@
+ add_host_shader(contact_shadow.comp contact_shadow_comp)
+ add_host_shader(point_volumetric.comp point_volumetric_comp)
+ add_host_shader(point_shadow.comp point_shadow_comp)
++add_host_shader(depth_of_field.comp depth_of_field_camera_comp CAMERA=1)
++add_host_shader(depth_of_field.comp depth_of_field_snapshot_comp SNAPSHOT=1)
++add_host_shader(depth_of_field.comp depth_of_field_kernel_comp KERNEL=1)
++add_host_shader(depth_of_field.comp depth_of_field_prepare_comp PREPARE=1)
++add_host_shader(depth_of_field.comp depth_of_field_gather_comp GATHER=1)
++add_host_shader(depth_of_field.comp depth_of_field_composite_comp COMPOSITE=1)
++add_host_shader(depth_of_field.comp depth_of_field_focus_comp FOCUS=1)
++add_host_shader(depth_of_field.comp depth_of_field_near_tiles_comp NEAR_TILES=1)
++add_host_shader(depth_of_field.comp depth_of_field_near_comp NEAR=1)
+ add_host_shader(volumetric_light.comp volumetric_light_integrate_comp INTEGRATE=1)
+ add_host_shader(volumetric_light.comp volumetric_light_repair_comp REPAIR=1)
+ add_host_shader(volumetric_light.comp volumetric_light_tint_comp TINT=1)
+@@ -335,6 +344,12 @@
+ add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
+ target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+ target_include_directories(motion-history-test PRIVATE ..)
++add_executable(depth-of-field-shader-test EXCLUDE_FROM_ALL ../tests/test_depth_of_field.cpp)
++target_include_directories(depth-of-field-shader-test PRIVATE ${SHADER_INCLUDE})
++target_compile_options(depth-of-field-shader-test PRIVATE -UNDEBUG -Wall -Werror)
++target_link_libraries(depth-of-field-shader-test PRIVATE Vulkan::Vulkan)
++add_dependencies(depth-of-field-shader-test host_shaders)
++
+ add_executable(tier1-live-test EXCLUDE_FROM_ALL ../tests/test_tier1_live.cpp)
+ target_compile_options(tier1-live-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+ target_include_directories(tier1-live-test PRIVATE ..)
+diff --git a/gpu/shadps4/video_core/host_shaders/depth_of_field.comp b/gpu/shadps4/video_core/host_shaders/depth_of_field.comp
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/host_shaders/depth_of_field.comp
+@@ -0,0 +1,377 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#version 450
++
++#if defined(CAMERA) || defined(KERNEL) || defined(FOCUS)
++layout(local_size_x = 1, local_size_y = 1) in;
++#else
++layout(local_size_x = 8, local_size_y = 8) in;
++#endif
++
++layout(std430, binding = 0) readonly buffer Constants { float cb[]; };
++layout(std430, binding = 1) readonly buffer VertexConstants { float vb[]; };
++layout(std430, binding = 2) buffer State {
++    vec4 ellipse;
++    vec4 camera;
++    vec4 focus;
++};
++layout(binding = 3) uniform sampler2D sharp;
++layout(binding = 4) uniform sampler2D depth;
++layout(binding = 5) uniform sampler2D prepared;
++layout(binding = 6) uniform sampler2D half_depth;
++layout(binding = 7) uniform sampler2D blurred;
++layout(r32f, binding = 8) uniform writeonly image2D depth_out;
++layout(rgba16f, binding = 9) uniform writeonly image2D prepared_out;
++layout(r32f, binding = 10) uniform writeonly image2D half_depth_out;
++layout(rgba16f, binding = 11) uniform writeonly image2D blurred_out;
++layout(rgba16f, binding = 12) uniform image2D scene_out;
++layout(r32f, binding = 13) uniform writeonly image2D near_tiles_out;
++layout(binding = 14) uniform sampler2D near_tiles;
++
++layout(push_constant) uniform Params {
++    uint constants_word;
++    uint vertex_word;
++    uvec2 size;
++    float intensity;
++    float delta_seconds;
++    uint reset_focus;
++    uint tile_size;
++} pc;
++
++bool finite(float v) { return !isnan(v) && !isinf(v); }
++float curve(float alpha) {
++    return cb[pc.constants_word + 76] * alpha + cb[pc.constants_word + 77];
++}
++bool compatible() {
++    return camera.w == 1.0 && ellipse.w == 1.0 &&
++           finite(cb[pc.constants_word + 76]) && cb[pc.constants_word + 76] > 0.0 &&
++           finite(cb[pc.constants_word + 77]);
++}
++float depth_weight(float a, float b) {
++    return clamp(1.0 - abs(a - b) / max(0.02 * min(a, b), 0.001), 0.0, 1.0);
++}
++
++float near_amount(float z) {
++    if (camera.w != 1.0 || focus.y != 1.0 || z <= 0.0 || !finite(z)) return 0.0;
++    // Keep a generous gameplay focus zone and the usual third-person subject
++    // distance sharp. Only genuine camera foreground receives the new blur.
++    float start = min(0.45 / focus.x, 2.5);
++    return smoothstep(0.0, 1.0,
++        clamp((1.0 / z - 1.0 / start) / (1.0 / 0.45 - 1.0 / start), 0.0, 1.0));
++}
++float foreground_strength(ivec2 p) {
++    vec2 uv = (vec2(p) + 0.5) / vec2(pc.size);
++    // A broad head-to-cloak safety region, not a player identity mask.
++    float half_width = mix(0.18, 0.50, smoothstep(0.0, 0.85, uv.y));
++    return smoothstep(0.88, 1.08, abs(uv.x - 0.5) / half_width);
++}
++float near_radius(float z, ivec2 p) {
++    return near_amount(z) * foreground_strength(p) *
++           (10.0 / 1080.0) * float(pc.size.y) * pc.intensity;
++}
++float max_near_radius() { return (10.0 / 1080.0) * float(pc.size.y) * pc.intensity; }
++int near_tile_size() { return max(1, int(pc.tile_size)); }
++
++#if defined(NEAR_TILES)
++shared uint tile_radius[64];
++#endif
++
++#if defined(COMPOSITE)
++vec4 sharp_tap(vec2 position, float center_z) {
++    ivec2 base = ivec2(floor(position));
++    vec2 f = fract(position);
++    vec4 result = vec4(0.0);
++    for (int i = 0; i < 4; ++i) {
++        ivec2 o = ivec2(i & 1, i >> 1);
++        ivec2 p = clamp(base + o, ivec2(0), ivec2(pc.size) - 1);
++        vec4 value = texelFetch(sharp, p, 0);
++        float sample_z = texelFetch(depth, p, 0).r;
++        float q = curve(value.a);
++        vec2 bilinear = mix(1.0 - f, f, vec2(o));
++        float visibility = sample_z > 0.0
++            ? clamp(1.0 - max(center_z - sample_z, 0.0) / max(0.02 * center_z, 0.001), 0.0, 1.0)
++            : 0.0;
++        float w = finite(q) ? bilinear.x * bilinear.y * visibility * clamp(q - 1.0, 0.0, 1.0) : 0.0;
++        result += vec4(value.rgb * w, w);
++    }
++    return result;
++}
++#endif
++
++void main() {
++#if defined(CAMERA)
++    float z = cb[pc.constants_word + 14];
++    float w = cb[pc.constants_word + 15];
++    // The verified forward-Z inverse projection has h.z = 1.
++    bool valid = cb[pc.constants_word + 11] == 1.0 &&
++                 cb[pc.constants_word + 10] == 0.0 &&
++                 finite(z) && finite(w) && z < 0.0 && w > -z;
++    camera = vec4(z, w, 0.0, valid ? 1.0 : 0.0);
++#elif defined(KERNEL)
++    vec2 mean = vec2(0.0);
++    vec3 second = vec3(0.0);
++    float total = 0.0;
++    bool valid = true;
++    for (uint i = 0; i < 7; ++i) {
++        vec2 offset = vec2(vb[pc.vertex_word + 136 + 4 * i],
++                           vb[pc.vertex_word + 137 + 4 * i]);
++        float weight = cb[pc.constants_word + 616 + 4 * i];
++        valid = valid && finite(offset.x) && finite(offset.y) && finite(weight) &&
++                all(lessThanEqual(abs(offset), vec2(0.125))) &&
++                weight >= 0.0 && weight <= 1.0;
++        for (uint c = 1; c < 3; ++c)
++            valid = valid && abs(cb[pc.constants_word + 616 + 4 * i + c] - weight) < 0.0001;
++        mean += weight * offset;
++        second += weight * vec3(offset.x * offset.x, offset.x * offset.y,
++                                offset.y * offset.y);
++        total += weight;
++    }
++    valid = valid && abs(total - 1.0) < 0.01;
++    mean /= max(total, 0.0001);
++    second = second / max(total, 0.0001) -
++             vec3(mean.x * mean.x, mean.x * mean.y, mean.y * mean.y);
++    // A uniform disk's covariance is R^2/4. Cholesky preserves the stock
++    // kernel's rotation, anisotropy and second moment in normalized UV units.
++    float a = sqrt(max(second.x, 0.0));
++    float b = second.y / max(a, 1e-10);
++    float c = sqrt(max(second.z - b * b, 0.0));
++    valid = valid && a > 0.0 && c > 0.0 &&
++            all(lessThan(abs(mean), vec2(0.0001)));
++    ellipse = vec4(2.0 * a, 2.0 * b, 2.0 * c, valid ? 1.0 : 0.0);
++#elif defined(SNAPSHOT)
++    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
++    if (any(greaterThanEqual(p, ivec2(pc.size)))) return;
++    vec2 uv = (vec2(p) + 0.5) / vec2(pc.size);
++    float d = textureLod(depth, uv, 0.0).r;
++    float denominator = camera.x * d + camera.y;
++    float z = camera.w == 1.0 && finite(d) && d >= 0.0 && d <= 1.0 &&
++              denominator > 0.0 ? 1.0 / denominator : 0.0;
++    imageStore(depth_out, p, vec4(z));
++#elif defined(FOCUS)
++    if (camera.w != 1.0) {
++        focus = vec4(0.0);
++        return;
++    }
++    float samples[49];
++    int count = 0;
++    // Upper-centre metering avoids the hunter's normal lower-centre silhouette.
++    for (int y = 0; y < 7; ++y) {
++        for (int x = 0; x < 7; ++x) {
++            vec2 uv = vec2(0.38 + float(x) * 0.04, 0.23 + float(y) * 0.03);
++            ivec2 p = clamp(ivec2(uv * vec2(pc.size)), ivec2(0), ivec2(pc.size) - 1);
++            float z = texelFetch(depth, p, 0).r;
++            if (finite(z) && z > 0.1 && z < 200.0) samples[count++] = z;
++        }
++    }
++    for (int i = 1; i < count; ++i) {
++        float value = samples[i];
++        int j = i;
++        while (j > 0 && samples[j - 1] > value) {
++            samples[j] = samples[j - 1];
++            --j;
++        }
++        samples[j] = value;
++    }
++    // Sparse foliage/sky must not drag focus to infinity or to a single leaf.
++    float target = 1.0 / clamp(count >= 12 ? samples[count / 2] : 30.0, 3.0, 40.0);
++    bool reset = pc.reset_focus != 0 || !finite(focus.x) || focus.y != 1.0 ||
++                 abs(focus.z - camera.x) > 0.01 || abs(focus.w - camera.y) > 0.01;
++    float inverse_focus = target;
++    if (!reset) {
++        inverse_focus = focus.x;
++        if (abs(target - inverse_focus) > 0.03 * inverse_focus)
++            inverse_focus = mix(inverse_focus, target,
++                1.0 - exp(-clamp(pc.delta_seconds, 0.0, 0.1) / 0.25));
++    }
++    focus = vec4(inverse_focus, 1.0, camera.x, camera.y);
++#elif defined(NEAR_TILES)
++    ivec2 origin = ivec2(gl_WorkGroupID.xy) * near_tile_size();
++    float radius = 0.0;
++    for (int y = int(gl_LocalInvocationID.y); y < near_tile_size(); y += 8) {
++        for (int x = int(gl_LocalInvocationID.x); x < near_tile_size(); x += 8) {
++            ivec2 p = origin + ivec2(x, y);
++            if (all(lessThan(p, ivec2(pc.size))))
++                radius = max(radius, near_radius(texelFetch(depth, p, 0).r, p));
++        }
++    }
++    uint index = gl_LocalInvocationIndex;
++    tile_radius[index] = floatBitsToUint(radius);
++    barrier();
++    for (uint stride = 32; stride > 0; stride >>= 1) {
++        if (index < stride) tile_radius[index] = max(tile_radius[index], tile_radius[index + stride]);
++        barrier();
++    }
++    if (index == 0)
++        imageStore(near_tiles_out, ivec2(gl_WorkGroupID.xy), vec4(uintBitsToFloat(tile_radius[0])));
++#elif defined(NEAR)
++    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
++    if (any(greaterThanEqual(p, ivec2(pc.size))) ||
++        any(notEqual(textureSize(sharp, 0), ivec2(pc.size))) || pc.intensity <= 0.0 ||
++        focus.y != 1.0 || camera.w != 1.0) return;
++    float strength = foreground_strength(p);
++    if (strength == 0.0) return;
++    int tile_size = near_tile_size();
++    ivec2 tile = p / tile_size;
++    float search_radius = 0.0;
++    ivec2 count = (ivec2(pc.size) + tile_size - 1) / tile_size;
++    for (int y = -1; y <= 1; ++y) {
++        for (int x = -1; x <= 1; ++x) {
++            ivec2 s = tile + ivec2(x, y);
++            if (all(greaterThanEqual(s, ivec2(0))) && all(lessThan(s, count)))
++                search_radius = max(search_radius, texelFetch(near_tiles, s, 0).r);
++        }
++    }
++    if (search_radius < 0.5) return;
++    float center_z = texelFetch(depth, p, 0).r;
++    if (center_z <= 0.0) return;
++    vec3 sum = vec3(0.0);
++    float total = 0.0;
++    for (int i = 0; i < 48; ++i) {
++        float angle = float(i) * 2.39996323;
++        vec2 disk = sqrt((float(i) + 0.5) / 48.0) * vec2(cos(angle), sin(angle));
++        vec2 position = vec2(p) + disk * search_radius;
++        ivec2 base = ivec2(floor(position));
++        vec2 f = fract(position);
++        for (int j = 0; j < 4; ++j) {
++            ivec2 o = ivec2(j & 1, j >> 1);
++            ivec2 s = clamp(base + o, ivec2(0), ivec2(pc.size) - 1);
++            float z = texelFetch(depth, s, 0).r;
++            float radius = near_radius(z, s);
++            float distance = length(vec2(s - p));
++            vec2 bilinear = mix(1.0 - f, f, vec2(o));
++            // Foreground may spread over farther layers, never over a closer occluder.
++            float visibility = z > 0.0
++                ? 1.0 - smoothstep(0.02, 0.05, (z - center_z) / max(center_z, 0.001)) : 0.0;
++            // Focused sources must not replace existing far bokeh with sharp colour.
++            float coverage = clamp(radius - distance + 0.5, 0.0, 1.0) * min(radius, 1.0);
++            float w = bilinear.x * bilinear.y * coverage * visibility *
++                      search_radius * search_radius / max(radius * radius, 0.25);
++            sum += texelFetch(sharp, s, 0).rgb * w;
++            total += w;
++        }
++    }
++    if (total <= 0.0001) return;
++    vec4 current = imageLoad(scene_out, p);
++    float opacity = strength *
++        max(near_amount(center_z) * min(pc.intensity, 1.0), clamp(total / 48.0, 0.0, 1.0));
++    imageStore(scene_out, p, vec4(mix(current.rgb, sum / total, opacity), current.a));
++#elif defined(PREPARE)
++    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
++    if (any(greaterThanEqual(p, imageSize(prepared_out)))) return;
++    vec4 values[4];
++    float distances[4];
++    float closest = 1e30;
++    for (int i = 0; i < 4; ++i) {
++        ivec2 s = min(2 * p + ivec2(i & 1, i >> 1), ivec2(pc.size) - 1);
++        bool sized = all(equal(textureSize(sharp, 0), ivec2(pc.size)));
++        values[i] = sized ? texelFetch(sharp, s, 0) : vec4(0.0);
++        distances[i] = sized ? texelFetch(depth, s, 0).r : 0.0;
++        if (distances[i] > 0.0) closest = min(closest, distances[i]);
++    }
++    vec4 sum = vec4(0.0);
++    float total = 0.0;
++    for (int i = 0; i < 4; ++i) {
++        float w = distances[i] > 0.0 ? depth_weight(closest, distances[i]) : 0.0;
++        float q = curve(values[i].a);
++        // Negative/near and unknown curves stay on the original Yebis path.
++        if (!finite(q) || !compatible()) w = 0.0;
++        sum += w * vec4(values[i].rgb, finite(q) ? clamp(q - 1.0, 0.0, 1.0) : 0.0);
++        total += w;
++    }
++    imageStore(prepared_out, p, total > 0.0 ? sum / total : vec4(0.0));
++    imageStore(half_depth_out, p, vec4(total > 0.0 ? closest : 0.0));
++#elif defined(GATHER)
++    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
++    if (any(greaterThanEqual(p, imageSize(blurred_out)))) return;
++    vec4 center = texelFetch(prepared, p, 0);
++    float z = texelFetch(half_depth, p, 0).r;
++    vec3 sum = center.rgb;
++    float total = 1.0;
++    if (center.a > 0.0 && z > 0.0 && compatible()) {
++        vec2 dimensions = vec2(pc.size) * 0.5;
++        float radius = sqrt(center.a) * pc.intensity;
++        for (int i = 0; i < 48; ++i) {
++            float angle = float(i) * 2.39996323;
++            vec2 disk = sqrt((float(i) + 0.5) / 48.0) * vec2(cos(angle), sin(angle));
++            vec2 offset = vec2(ellipse.x * disk.x,
++                               ellipse.y * disk.x + ellipse.z * disk.y) * dimensions * radius;
++            ivec2 s = clamp(ivec2(round(vec2(p) + offset)), ivec2(0),
++                           textureSize(prepared, 0) - 1);
++            vec4 value = texelFetch(prepared, s, 0);
++            float sample_z = texelFetch(half_depth, s, 0).r;
++            // Far blur must not pull a sharp foreground silhouette into the background.
++            float w = value.a > 0.0 && sample_z > 0.0
++                ? clamp(1.0 - max(z - sample_z, 0.0) / max(0.02 * z, 0.001), 0.0, 1.0)
++                : 0.0;
++            sum += w * value.rgb;
++            total += w;
++        }
++    }
++    imageStore(blurred_out, p, vec4(sum / total, center.a));
++#elif defined(COMPOSITE)
++    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
++    if (any(greaterThanEqual(p, ivec2(pc.size)))) return;
++    if (any(notEqual(textureSize(sharp, 0), ivec2(pc.size)))) return;
++    vec4 source = texelFetch(sharp, p, 0);
++    vec4 stock = imageLoad(scene_out, p);
++    vec3 fallback = mix(source.rgb, stock.rgb, min(pc.intensity, 1.0));
++    if (pc.intensity == 0.0 || !compatible()) {
++        imageStore(scene_out, p, vec4(fallback, stock.a));
++        return;
++    }
++    float q = curve(source.a);
++    float z = texelFetch(depth, p, 0).r;
++    if (!finite(q) || q <= 1.0 || z <= 0.0) {
++        imageStore(scene_out, p, vec4(fallback, stock.a));
++        return;
++    }
++    vec2 h = (vec2(p) + 0.5) * 0.5 - 0.5;
++    ivec2 base = ivec2(floor(h));
++    vec2 f = fract(h);
++    vec3 sum = vec3(0.0);
++    float total = 0.0;
++    float amount = clamp(q - 1.0, 0.0, 1.0);
++    for (int i = 0; i < 4; ++i) {
++        ivec2 o = ivec2(i & 1, i >> 1);
++        ivec2 s = clamp(base + o, ivec2(0), textureSize(blurred, 0) - 1);
++        vec4 value = texelFetch(blurred, s, 0);
++        float sample_z = texelFetch(half_depth, s, 0).r;
++        vec2 bilinear = mix(1.0 - f, f, vec2(o));
++        float w = bilinear.x * bilinear.y * depth_weight(z, sample_z) *
++                  clamp(1.0 - abs(value.a - amount) * 4.0, 0.0, 1.0);
++        sum += w * value.rgb;
++        total += w;
++    }
++    vec3 result = total > 0.0001 ? sum / total : fallback;
++    float confidence = smoothstep(0.0, 0.75, total);
++    float edge = 0.0;
++    const ivec2 neighbors[4] = ivec2[4](ivec2(-1, 0), ivec2(1, 0),
++                                       ivec2(0, -1), ivec2(0, 1));
++    for (int i = 0; i < 4; ++i) {
++        ivec2 s = clamp(p + neighbors[i], ivec2(0), ivec2(pc.size) - 1);
++        float sample_z = texelFetch(depth, s, 0).r;
++        float sample_q = curve(texelFetch(sharp, s, 0).a);
++        if (sample_z > 0.0 && finite(sample_q)) {
++            edge = max(edge, smoothstep(0.005, 0.02, abs(z - sample_z) / max(z, 0.001)));
++            edge = max(edge, smoothstep(0.1, 0.5,
++                       abs(amount - clamp(sample_q - 1.0, 0.0, 1.0))));
++        }
++    }
++    if (edge > 0.0) {
++        // Thin moving surfaces cannot be represented reliably by one depth per
++        // 2x2 block. Repair only these pixels from full-resolution, masked bilinear taps.
++        vec4 repair = vec4(source.rgb, 1.0);
++        for (int i = 0; i < 24; ++i) {
++            float angle = float(i) * 2.39996323;
++            vec2 disk = sqrt((float(i) + 0.5) / 24.0) * vec2(cos(angle), sin(angle));
++            vec2 offset = vec2(ellipse.x * disk.x,
++                               ellipse.y * disk.x + ellipse.z * disk.y) *
++                          vec2(pc.size) * sqrt(amount) * pc.intensity;
++            repair += sharp_tap(vec2(p) + offset, z);
++        }
++        result = mix(result, repair.rgb / repair.a, edge);
++        confidence = mix(confidence, 1.0, edge);
++    }
++    // Keep the downstream alpha contract exactly, including stock near/fallback pixels.
++    imageStore(scene_out, p, vec4(mix(fallback, result, confidence), stock.a));
++#endif
++}
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.cpp
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.cpp
+@@ -0,0 +1,443 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#include "video_core/renderer_vulkan/vk_depth_of_field.h"
++
++#include <cstdio>
++#include <algorithm>
++#include <cmath>
++#include <cstdlib>
++#include <string_view>
++#include <vector>
++
++#include "bbport_settings.h"
++#include "common/assert.h"
++#include "video_core/host_shaders/depth_of_field_camera_comp.h"
++#include "video_core/host_shaders/depth_of_field_snapshot_comp.h"
++#include "video_core/host_shaders/depth_of_field_kernel_comp.h"
++#include "video_core/host_shaders/depth_of_field_prepare_comp.h"
++#include "video_core/host_shaders/depth_of_field_gather_comp.h"
++#include "video_core/host_shaders/depth_of_field_composite_comp.h"
++#include "video_core/host_shaders/depth_of_field_focus_comp.h"
++#include "video_core/host_shaders/depth_of_field_near_tiles_comp.h"
++#include "video_core/host_shaders/depth_of_field_near_comp.h"
++#include "video_core/renderer_vulkan/vk_effect_pass.h"
++#include "video_core/renderer_vulkan/vk_instance.h"
++#include "video_core/renderer_vulkan/vk_platform.h"
++#include "video_core/renderer_vulkan/vk_runtime.h"
++#include "video_core/renderer_vulkan/vk_scene_resolution.h"
++#include "video_core/renderer_vulkan/vk_scheduler.h"
++#include "video_core/renderer_vulkan/vk_shader_util.h"
++#include "video_core/texture_cache/texture_cache.h"
++
++namespace Vulkan {
++namespace {
++constexpr auto Compute = vk::PipelineStageFlagBits2::eComputeShader;
++constexpr vk::ImageSubresourceRange ColorRange{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
++constexpr auto Sampled = vk::DescriptorType::eCombinedImageSampler;
++constexpr auto Storage = vk::DescriptorType::eStorageImage;
++constexpr auto Buffer = vk::DescriptorType::eStorageBuffer;
++
++bool HasWords(const vk::DescriptorBufferInfo& info, u32 offset, u32 count) {
++    return info.buffer && offset % 4 == 0 && info.range >= u64(offset) + 4ull * count;
++}
++vk::WriteDescriptorSet Write(u32 binding, const vk::DescriptorBufferInfo& info) {
++    return {.dstBinding = binding, .descriptorCount = 1, .descriptorType = Buffer,
++            .pBufferInfo = &info};
++}
++vk::WriteDescriptorSet Write(u32 binding, vk::DescriptorType type,
++                              const vk::DescriptorImageInfo& info) {
++    return {.dstBinding = binding, .descriptorCount = 1, .descriptorType = type,
++            .pImageInfo = &info};
++}
++} // namespace
++
++DepthOfField::DepthOfField(const Instance& instance_, Scheduler& scheduler_,
++                           VideoCore::TextureCache& texture_cache_, Runtime& runtime_,
++                           SceneTargets& scene_targets_)
++    : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_},
++      runtime{runtime_}, scene_targets{scene_targets_} {
++    enabled = BbSettings::Get().startup_dof_mode == 1;
++}
++
++bool DepthOfField::Ready() {
++    if (initialized) return enabled;
++    initialized = true;
++    if (!EffectPass::StorageFormat(instance,vk::Format::eR16G16B16A16Sfloat) ||
++        !EffectPass::StorageFormat(instance,vk::Format::eR32Sfloat)) {
++        enabled = false; Fallback("required storage formats unavailable"); return false;
++    }
++    const auto good = [&](vk::Result result) {
++        if (result == vk::Result::eSuccess) return true;
++        enabled = false; Fallback("compute initialization failed"); return false;
++    };
++    const auto device = instance.GetDevice();
++    const std::array types{Buffer, Buffer, Buffer, Sampled, Sampled, Sampled, Sampled,
++                           Sampled, Storage, Storage, Storage, Storage, Storage, Storage, Sampled};
++    std::array<vk::DescriptorSetLayoutBinding, types.size()> bindings;
++    for (u32 i = 0; i < types.size(); ++i)
++        bindings[i] = {i, types[i], 1, vk::ShaderStageFlagBits::eCompute};
++    auto made_set = device.createDescriptorSetLayoutUnique({
++        .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
++        .bindingCount = u32(bindings.size()), .pBindings = bindings.data()});
++    if (!good(made_set.result)) return false;
++    set = std::move(made_set.value);
++    const vk::PushConstantRange range{vk::ShaderStageFlagBits::eCompute, 0, sizeof(Params)};
++    auto made_layout = device.createPipelineLayoutUnique({
++        .setLayoutCount = 1, .pSetLayouts = &*set,
++        .pushConstantRangeCount = 1, .pPushConstantRanges = &range});
++    if (!good(made_layout.result)) return false;
++    layout = std::move(made_layout.value);
++    const std::array<std::span<const u32>, Count> codes{
++        DEPTH_OF_FIELD_CAMERA_COMP, DEPTH_OF_FIELD_SNAPSHOT_COMP, DEPTH_OF_FIELD_KERNEL_COMP,
++        DEPTH_OF_FIELD_PREPARE_COMP, DEPTH_OF_FIELD_GATHER_COMP, DEPTH_OF_FIELD_COMPOSITE_COMP,
++        DEPTH_OF_FIELD_FOCUS_COMP, DEPTH_OF_FIELD_NEAR_TILES_COMP, DEPTH_OF_FIELD_NEAR_COMP};
++    for (u32 i = 0; i < Count; ++i) {
++        const auto [module_result,module] = device.createShaderModule({.codeSize=codes[i].size_bytes(),.pCode=codes[i].data()});
++        if (!good(module_result)) return false;
++        auto made_pipeline = device.createComputePipelineUnique(
++            {}, vk::ComputePipelineCreateInfo{
++                .stage = {.stage = vk::ShaderStageFlagBits::eCompute,
++                          .module = module, .pName = "main"}, .layout = *layout});
++        device.destroyShaderModule(module);
++        if (!good(made_pipeline.result)) return false;
++        pipelines[i] = std::move(made_pipeline.value);
++    }
++    auto made_sampler = device.createSamplerUnique({
++        .magFilter = vk::Filter::eNearest, .minFilter = vk::Filter::eNearest,
++        .mipmapMode = vk::SamplerMipmapMode::eNearest,
++        .addressModeU = vk::SamplerAddressMode::eClampToEdge,
++        .addressModeV = vk::SamplerAddressMode::eClampToEdge,
++        .addressModeW = vk::SamplerAddressMode::eClampToEdge});
++    if (!good(made_sampler.result)) return false;
++    sampler = std::move(made_sampler.value);
++    state = std::make_unique<VideoCore::Buffer>(
++        instance, 0, 48, VideoCore::MemoryType::DeviceLocal, "DOF camera, kernel and autofocus");
++    std::printf("Modern DoF: compute pipelines ready (requires a recognized YEBIS draw chain)\n");
++    return true;
++}
++
++DepthOfField::~DepthOfField() {
++    // The presenter finished the GPU's work before the rasterizer goes.
++    const auto device = instance.GetDevice();
++    for (const auto& entry : view_cache) {
++        if (entry.view) {
++            device.destroyImageView(entry.view);
++        }
++    }
++}
++
++vk::ImageView DepthOfField::CachedView(const VideoCore::Image& image) {
++    const vk::Image handle = image.GetImage();
++    const vk::Format format = image.info.pixel_format;
++    ViewEntry* oldest = &view_cache[0];
++    for (auto& entry : view_cache) {
++        if (entry.view && entry.image == handle && entry.uid == image.image_uid &&
++            entry.format == format) {
++            entry.last_use = ++view_uses;
++            return entry.view;
++        }
++        if (entry.last_use < oldest->last_use) {
++            oldest = &entry;
++        }
++    }
++    const auto device = instance.GetDevice();
++    if (oldest->view) {
++        scheduler.DeferOperation([device, view = oldest->view] { device.destroyImageView(view); });
++    }
++    *oldest = {
++        .image = handle,
++        .uid = image.image_uid,
++        .format = format,
++        .view = Check<"create DOF HDR view">(device.createImageView({
++            .image = handle, .viewType = vk::ImageViewType::e2D,
++            .format = format, .subresourceRange = ColorRange})),
++        .last_use = ++view_uses,
++    };
++    return oldest->view;
++}
++
++bool DepthOfField::Enabled() const {
++    static_assert(std::string_view{BbSettings::Effects[1].key} == "effect_dof");
++    return enabled && BbSettings::Get().startup_effects[1];
++}
++
++void DepthOfField::Reset() {
++    camera_ready = encoded = kernel_ready = false;
++    source = {};
++    source_address = blur_target = 0;
++}
++
++void DepthOfField::Fallback(const char* reason) {
++    if (fallback_reported) return;
++    fallback_reported = true;
++    std::printf("Modern DOF: %s; retaining stock DOF for this view\n", reason);
++}
++
++DepthOfField::Target DepthOfField::Access(VideoCore::ImageId id, bool write) {
++    auto& image = texture_cache.GetImage(id);
++    if (image.info.pixel_format != vk::Format::eR16G16B16A16Sfloat ||
++        image.info.resources.levels != 1 || image.info.resources.layers != 1 || image.info.num_samples != 1) {
++        Fallback("unsupported HDR target layout");
++        return {};
++    }
++    const auto access = vk::AccessFlagBits2::eShaderRead |
++                        (write ? vk::AccessFlagBits2::eShaderWrite : vk::AccessFlagBits2::eNone);
++    if (scene_targets.Reduced() && scene_targets.EligibleScene(image)) {
++        VideoCore::ImageViewInfo info;
++        info.format = image.info.pixel_format;
++        const auto proxy = scene_targets.Read(id, info, Compute, access);
++        if (write && !(proxy.usage & vk::ImageUsageFlagBits::eStorage)) {
++            Fallback("HDR proxy lacks storage support");
++            return {};
++        }
++        return {proxy.view, scene_targets.Size().width, scene_targets.Size().height};
++    }
++    if (write && !(image.usage_flags & vk::ImageUsageFlagBits::eStorage)) {
++        Fallback("HDR target lacks storage support");
++        return {};
++    }
++    const auto view = CachedView(image);
++    runtime.Transit(&image, vk::ImageLayout::eGeneral, Compute, access);
++    runtime.FlushBarriers();
++    return {view, image.info.size.width, image.info.size.height};
++}
++
++bool DepthOfField::EnsureImages(u32 w, u32 h) {
++    if (width == w && height == h) return true;
++    if (!EffectPass::HasRoom(instance, 20ull*w*h)) {
++        Fallback("insufficient video-memory headroom"); return false;
++    }
++    for (Image* image : {&depth, &prepared, &half_depth, &blurred}) {
++        if (image->image) {
++            scheduler.DeferOperation(
++                [old = std::move(image->image), view = std::move(image->view)]() mutable {
++                    view.reset();
++                    old.Destroy();
++                });
++        }
++    }
++    width = w;
++    height = h;
++    focus_reset = true;
++    const auto device = instance.GetDevice();
++    const auto create = [&](Image& image, u32 x, u32 y, vk::Format format) {
++        image.image = VideoCore::UniqueImage(device, instance.GetAllocator());
++        image.image.Create({
++            .imageType = vk::ImageType::e2D, .format = format, .extent = {x, y, 1},
++            .mipLevels = 1, .arrayLayers = 1, .samples = vk::SampleCountFlagBits::e1,
++            .tiling = vk::ImageTiling::eOptimal,
++            .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled,
++            .initialLayout = vk::ImageLayout::eUndefined});
++        image.view = Check<"create DOF working view">(device.createImageViewUnique({
++            .image = vk::Image(image.image), .viewType = vk::ImageViewType::e2D,
++            .format = format, .subresourceRange = ColorRange}));
++        scheduler.Record([target = vk::Image(image.image)](vk::CommandBuffer cmd) {
++            EffectPass::InitGeneral(cmd, target, ColorRange);
++        });
++    };
++    create(depth, w, h, vk::Format::eR32Sfloat);
++    create(prepared, (w + 1) / 2, (h + 1) / 2, vk::Format::eR16G16B16A16Sfloat);
++    create(half_depth, (w + 1) / 2, (h + 1) / 2, vk::Format::eR32Sfloat);
++    create(blurred, (w + 1) / 2, (h + 1) / 2, vk::Format::eR16G16B16A16Sfloat);
++    return true;
++}
++
++void DepthOfField::Dispatch(Stage stage, const Params& params, u32 w, u32 h,
++                            std::span<const vk::WriteDescriptorSet> writes, Edge edge) {
++    ASSERT(writes.size() <= MaxWrites);
++    // Descriptor pointers are borrowed by the caller; record copies the pointed-to data.
++    std::array<vk::DescriptorImageInfo, MaxWrites> images{};
++    std::array<vk::DescriptorBufferInfo, MaxWrites> buffers{};
++    std::array<u32, MaxWrites> bindings{};
++    std::array<vk::DescriptorType, MaxWrites> types{};
++    std::array<bool, MaxWrites> is_image{};
++    const u32 count = u32(writes.size());
++    for (u32 i = 0; i < count; ++i) {
++        bindings[i] = writes[i].dstBinding;
++        types[i] = writes[i].descriptorType;
++        is_image[i] = writes[i].pImageInfo != nullptr;
++        if (is_image[i]) {
++            images[i] = *writes[i].pImageInfo;
++        } else {
++            buffers[i] = *writes[i].pBufferInfo;
++        }
++    }
++    const bool full_before = edge == Edge::Both || edge == Edge::First;
++    const bool full_after = edge == Edge::Both || edge == Edge::Last;
++    scheduler.Record(
++        [params, w, h, count, images, buffers, bindings, types, is_image, full_before, full_after,
++         pipeline = *pipelines[stage], pipeline_layout = *layout](vk::CommandBuffer cmd) {
++            if (full_before) {
++                EffectPass::FullBarrier(cmd);
++            } else {
++                EffectPass::ComputeBarrier(cmd);
++            }
++            cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
++            std::array<vk::WriteDescriptorSet, MaxWrites> descriptors;
++            for (u32 i = 0; i < count; ++i) {
++                descriptors[i] = {.dstBinding = bindings[i], .descriptorCount = 1,
++                                  .descriptorType = types[i]};
++                if (is_image[i]) {
++                    descriptors[i].pImageInfo = &images[i];
++                } else {
++                    descriptors[i].pBufferInfo = &buffers[i];
++                }
++            }
++            cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, pipeline_layout, 0,
++                                     count, descriptors.data());
++            cmd.pushConstants(pipeline_layout, vk::ShaderStageFlagBits::eCompute,
++                              0, sizeof(params), &params);
++            cmd.dispatch(w, h, 1);
++            if (full_after) {
++                EffectPass::FullBarrier(cmd);
++            }
++        });
++}
++
++void DepthOfField::Camera(const vk::DescriptorBufferInfo& constants, u32 offset) {
++    camera_ready = false;
++    if (!Enabled() || !Ready()) return;
++    if (!HasWords(constants, offset, 16)) {
++        Fallback("unrecognized camera constants");
++        return;
++    }
++    scheduler.EndRendering();
++    const vk::DescriptorBufferInfo gpu_state{state->Handle(), 0, 48};
++    const std::array writes{Write(0, constants), Write(2, gpu_state)};
++    Dispatch(CaptureCamera, {offset / 4, 0, 0, 0}, 1, 1, writes);
++    camera_ready = true;
++}
++
++void DepthOfField::Encode(VideoCore::ImageId id, const vk::DescriptorImageInfo& input_depth) {
++    encoded = kernel_ready = false;
++    if (!Enabled() || !camera_ready || !id || !input_depth.imageView) return;
++    scheduler.EndRendering();
++    const auto target = Access(id, false);
++    if (!target.view || !target.width || !target.height) return;
++    if (!EnsureImages(target.width, target.height)) return;
++    const vk::DescriptorBufferInfo gpu_state{state->Handle(), 0, 48};
++    const vk::DescriptorImageInfo di{*sampler, input_depth.imageView, input_depth.imageLayout};
++    const vk::DescriptorImageInfo out{{}, *depth.view, vk::ImageLayout::eGeneral};
++    const std::array writes{Write(2, gpu_state), Write(4, Sampled, di), Write(8, Storage, out)};
++    Dispatch(Snapshot, {0, 0, width, height}, (width + 7) / 8, (height + 7) / 8, writes);
++    auto& image = texture_cache.GetImage(id);
++    source = id;
++    source_uid = image.image_uid;
++    source_address = image.info.guest_address;
++    encoded = true;
++}
++
++void DepthOfField::Kernel(VAddr target, const vk::DescriptorBufferInfo& pixel, u32 pixel_offset,
++                          const vk::DescriptorBufferInfo& vertex, u32 vertex_offset) {
++    kernel_ready = false;
++    if (!Enabled() || !encoded) return;
++    if (!target || !HasWords(pixel, pixel_offset, 643) ||
++        !HasWords(vertex, vertex_offset, 162)) {
++        Fallback("unrecognized stock blur constants");
++        return;
++    }
++    scheduler.EndRendering();
++    const vk::DescriptorBufferInfo gpu_state{state->Handle(), 0, 48};
++    const std::array writes{Write(0, pixel), Write(1, vertex), Write(2, gpu_state)};
++    Dispatch(CaptureKernel, {pixel_offset / 4, vertex_offset / 4, width, height}, 1, 1, writes);
++    blur_target = target;
++    kernel_ready = true;
++}
++
++void DepthOfField::Composite(VideoCore::ImageId target_id, VAddr sharp_address, VAddr blur_address,
++                             const vk::DescriptorImageInfo& sharp,
++                             const vk::DescriptorBufferInfo& constants, u32 offset) {
++    const bool ready = encoded && kernel_ready;
++    encoded = kernel_ready = false;
++    if (!Enabled() || !ready || !target_id) return;
++    const auto* source_image = texture_cache.TryGetImage(source, source_uid);
++    if (!source_image || sharp_address != source_address ||
++        blur_address != blur_target || target_id == source || !sharp.imageView ||
++        texture_cache.GetImage(target_id).GetImage() == source_image->GetImage() ||
++        !HasWords(constants, offset, 78)) {
++        Fallback("unrecognized DOF resource chain");
++        return;
++    }
++    scheduler.EndRendering();
++    const auto target = Access(target_id, true);
++    if (!target.view) return;
++    if (target.width != width || target.height != height) {
++        Fallback("DOF source and output extents differ");
++        return;
++    }
++    if (!composite_reported) { composite_reported=true;
++        std::printf("Modern DoF: recognized YEBIS recombination at %ux%u; intensity is live\n",width,height);
++    }
++    const float raw_intensity =
++        BbSettings::Get().graphics_dof_intensity.load(std::memory_order_relaxed);
++    const vk::DescriptorBufferInfo gpu_state{state->Handle(), 0, 48};
++    const vk::DescriptorImageInfo si{*sampler, sharp.imageView, sharp.imageLayout};
++    const vk::DescriptorImageInfo di{*sampler, *depth.view, vk::ImageLayout::eGeneral};
++    const vk::DescriptorImageInfo pi{*sampler, *prepared.view, vk::ImageLayout::eGeneral};
++    const vk::DescriptorImageInfo hi{*sampler, *half_depth.view, vk::ImageLayout::eGeneral};
++    const vk::DescriptorImageInfo bi{*sampler, *blurred.view, vk::ImageLayout::eGeneral};
++    const vk::DescriptorImageInfo out{{}, target.view, vk::ImageLayout::eGeneral};
++    const float intensity = std::clamp(
++        std::isfinite(raw_intensity) ? raw_intensity : 1.0f, 0.0f, 3.0f);
++    const u32 tile_size = std::max(1u, u32(std::ceil((10.0f / 1080.0f) * height * intensity)) + 1);
++    const auto now = std::chrono::steady_clock::now();
++    const float elapsed = std::chrono::duration<float>(now - last_focus).count();
++    const Params params{offset / 4, 0, width, height, intensity,
++                        std::clamp(elapsed, 0.0f, 0.1f), u32(focus_reset || elapsed > 0.25f),
++                        tile_size};
++    last_focus = now;
++    focus_reset = false;
++    const std::array focus_writes{Write(2, gpu_state), Write(4, Sampled, di)};
++    Dispatch(Focus, params, 1, 1, focus_writes, Edge::First);
++    const u32 half_w = (width + 1) / 2, half_h = (height + 1) / 2;
++    const std::array prep_writes{Write(0, constants), Write(2, gpu_state),
++        Write(3, Sampled, si), Write(4, Sampled, di), Write(9, Storage, pi),
++        Write(10, Storage, hi)};
++    Dispatch(Prepare, params, (half_w + 7) / 8, (half_h + 7) / 8, prep_writes, Edge::Middle);
++    const std::array gather_writes{Write(0, constants), Write(2, gpu_state),
++        Write(5, Sampled, pi), Write(6, Sampled, hi), Write(11, Storage, bi)};
++    Dispatch(Gather, params, (half_w + 7) / 8, (half_h + 7) / 8, gather_writes, Edge::Middle);
++    const std::array resolve_writes{Write(0, constants), Write(2, gpu_state),
++        Write(3, Sampled, si), Write(4, Sampled, di), Write(6, Sampled, hi),
++        Write(7, Sampled, bi), Write(12, Storage, out)};
++    const bool near_pass = intensity > 0.0f;
++    Dispatch(Resolve, params, (width + 7) / 8, (height + 7) / 8, resolve_writes,
++             near_pass ? Edge::Middle : Edge::Last);
++    if (near_pass) {
++        const u32 tiles_w = (width + tile_size - 1) / tile_size;
++        const u32 tiles_h = (height + tile_size - 1) / tile_size;
++        if (!near_tiles.image || near_tile_size != tile_size ||
++            near_tiles.image.image_ci.extent.width != tiles_w ||
++            near_tiles.image.image_ci.extent.height != tiles_h) {
++            if (near_tiles.image) {
++                scheduler.DeferOperation(
++                    [old = std::move(near_tiles.image), view = std::move(near_tiles.view)]() mutable {
++                        view.reset();
++                        old.Destroy();
++                    });
++            }
++            near_tile_size = tile_size;
++            const auto device = instance.GetDevice();
++            near_tiles.image = VideoCore::UniqueImage(device, instance.GetAllocator());
++            near_tiles.image.Create({
++                .imageType = vk::ImageType::e2D, .format = vk::Format::eR32Sfloat,
++                .extent = {tiles_w, tiles_h, 1}, .mipLevels = 1, .arrayLayers = 1,
++                .samples = vk::SampleCountFlagBits::e1, .tiling = vk::ImageTiling::eOptimal,
++                .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled,
++                .initialLayout = vk::ImageLayout::eUndefined});
++            near_tiles.view = Check<"create near DOF tiles">(device.createImageViewUnique({
++                .image = vk::Image(near_tiles.image), .viewType = vk::ImageViewType::e2D,
++                .format = vk::Format::eR32Sfloat, .subresourceRange = ColorRange}));
++            scheduler.Record([image = vk::Image(near_tiles.image)](vk::CommandBuffer cmd) {
++                EffectPass::InitGeneral(cmd, image, ColorRange);
++            });
++        }
++        const vk::DescriptorImageInfo tiles{*sampler, *near_tiles.view, vk::ImageLayout::eGeneral};
++        const std::array tile_writes{Write(2, gpu_state), Write(4, Sampled, di),
++                                    Write(13, Storage, tiles)};
++        Dispatch(NearTiles, params, tiles_w, tiles_h, tile_writes, Edge::Middle);
++        const std::array near_writes{Write(2, gpu_state), Write(3, Sampled, si),
++            Write(4, Sampled, di), Write(12, Storage, out), Write(14, Sampled, tiles)};
++        Dispatch(Near, params, (width + 7) / 8, (height + 7) / 8, near_writes, Edge::Last);
++    }
++}
++} // namespace Vulkan
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.h b/gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.h
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.h
+@@ -0,0 +1,97 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#pragma once
++
++#include <array>
++#include <chrono>
++#include <span>
++
++#include "video_core/buffer_cache/buffer.h"
++#include "video_core/texture_cache/image.h"
++
++namespace VideoCore {
++class TextureCache;
++}
++
++namespace Vulkan {
++class SceneTargets;
++
++class DepthOfField {
++public:
++    DepthOfField(const Instance& instance, Scheduler& scheduler,
++                 VideoCore::TextureCache& texture_cache, Runtime& runtime,
++                 SceneTargets& scene_targets);
++    ~DepthOfField();
++
++    void Reset();
++    void Camera(const vk::DescriptorBufferInfo& constants, u32 offset);
++    void Encode(VideoCore::ImageId source, const vk::DescriptorImageInfo& depth);
++    void Kernel(VAddr target, const vk::DescriptorBufferInfo& pixel, u32 pixel_offset,
++                const vk::DescriptorBufferInfo& vertex, u32 vertex_offset);
++    void Composite(VideoCore::ImageId target, VAddr sharp_address, VAddr blur_address,
++                   const vk::DescriptorImageInfo& sharp,
++                   const vk::DescriptorBufferInfo& constants, u32 offset);
++
++private:
++    enum Stage : u32 {
++        CaptureCamera, Snapshot, CaptureKernel, Prepare, Gather, Resolve,
++        Focus, NearTiles, Near, Count
++    };
++    struct Image {
++        VideoCore::UniqueImage image;
++        vk::UniqueImageView view;
++    };
++    struct Target {
++        vk::ImageView view;
++        u32 width, height;
++    };
++    struct Params {
++        u32 constants_word, vertex_word, width, height;
++        float intensity = 1.0f;
++        float delta_seconds = 0.0f;
++        u32 reset_focus = 1;
++        u32 tile_size = 0;
++    };
++    static_assert(sizeof(Params) == 32);
++    struct ViewEntry {
++        vk::Image image;
++        u64 uid = 0;
++        vk::Format format{};
++        vk::ImageView view;
++        u64 last_use = 0;
++    };
++    static constexpr size_t MaxWrites = 8;
++    enum class Edge : u32 { Both, First, Middle, Last };
++    bool Enabled() const;
++    bool Ready();
++    void Fallback(const char* reason);
++    vk::ImageView CachedView(const VideoCore::Image& image);
++    Target Access(VideoCore::ImageId id, bool write);
++    bool EnsureImages(u32 width, u32 height);
++    void Dispatch(Stage stage, const Params& params, u32 width, u32 height,
++                  std::span<const vk::WriteDescriptorSet> writes, Edge edge = Edge::Both);
++
++    const Instance& instance;
++    Scheduler& scheduler;
++    VideoCore::TextureCache& texture_cache;
++    Runtime& runtime;
++    SceneTargets& scene_targets;
++    vk::UniqueDescriptorSetLayout set;
++    vk::UniquePipelineLayout layout;
++    std::array<vk::UniquePipeline, Count> pipelines;
++    vk::UniqueSampler sampler;
++    std::unique_ptr<VideoCore::Buffer> state;
++    Image depth, prepared, half_depth, blurred, near_tiles;
++    u32 near_tile_size = 0;
++    bool focus_reset = true;
++    std::chrono::steady_clock::time_point last_focus{};
++    VideoCore::ImageId source{};
++    u64 source_uid = 0;
++    VAddr source_address = 0, blur_target = 0;
++    u32 width = 0, height = 0;
++    bool enabled = true, camera_ready = false, encoded = false, kernel_ready = false;
++    bool fallback_reported = false;
++    bool initialized = false, composite_reported = false;
++    std::array<ViewEntry, 4> view_cache{};
++    u64 view_uses = 0;
++};
++} // namespace Vulkan
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_effect_pass.h b/gpu/shadps4/video_core/renderer_vulkan/vk_effect_pass.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_effect_pass.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_effect_pass.h
+@@ -26,4 +26,38 @@
+ 
+ void Mark(u64 key, const char* name);
+ 
++inline void MemoryBarrier(vk::CommandBuffer cmd, vk::PipelineStageFlags2 src_stage,
++                          vk::AccessFlags2 src_access, vk::PipelineStageFlags2 dst_stage,
++                          vk::AccessFlags2 dst_access) {
++    const vk::MemoryBarrier2 barrier{.srcStageMask = src_stage, .srcAccessMask = src_access,
++                                     .dstStageMask = dst_stage, .dstAccessMask = dst_access};
++    cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &barrier});
+ }
++
++inline void FullBarrier(vk::CommandBuffer cmd) {
++    constexpr auto All = vk::PipelineStageFlagBits2::eAllCommands;
++    constexpr auto Access = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
++    MemoryBarrier(cmd, All, Access, All, Access);
++}
++
++inline void ComputeBarrier(vk::CommandBuffer cmd) {
++    constexpr auto Compute = vk::PipelineStageFlagBits2::eComputeShader;
++    MemoryBarrier(cmd, Compute, vk::AccessFlagBits2::eShaderWrite, Compute,
++                  vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite);
++}
++
++inline void InitGeneral(vk::CommandBuffer cmd, vk::Image image,
++                        const vk::ImageSubresourceRange& range) {
++    const vk::ImageMemoryBarrier2 barrier{
++        .srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe,
++        .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
++        .dstAccessMask = vk::AccessFlagBits2::eShaderWrite,
++        .oldLayout = vk::ImageLayout::eUndefined, .newLayout = vk::ImageLayout::eGeneral,
++        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
++        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
++        .image = image, .subresourceRange = range};
++    cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier});
++}
++
++
++}
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp
+@@ -44,6 +44,7 @@
+ #include "video_core/renderer_vulkan/vk_contact_shadow.h"
+ #include "video_core/renderer_vulkan/vk_volumetric_light.h"
+ #include "video_core/renderer_vulkan/vk_point_shadow.h"
++#include "video_core/renderer_vulkan/vk_depth_of_field.h"
+ #include "video_core/renderer_vulkan/vk_tier1_shaders.h"
+ #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
+ #include "bbport_threads.h"
+@@ -94,6 +95,7 @@
+     hdr_native = std::make_unique<HdrNative>(instance, scheduler, texture_cache, runtime);
+     upscaler = std::make_unique<TemporalUpscaler>(instance, scheduler, texture_cache, runtime,
+                                                   *camera_motion, *scene_targets, *hdr_native);
++    depth_of_field = std::make_unique<DepthOfField>(instance,scheduler,texture_cache,runtime,*scene_targets);
+     Tier1ApplyLiveSettings(true);
+     if (!EmulatorSettings.IsNullGPU()) {
+         liverpool->BindRasterizer(this);
+@@ -653,6 +655,7 @@
+         camera_motion->OnGBufferPass(db_desc.first, vp.xscale < 0.0f ? -1.0f : 1.0f,
+                                      vp.yscale < 0.0f ? -1.0f : 1.0f);
+     }
++    if (gbuffer_draw) depth_of_field->Reset();
+     if (gbuffer_draw && (tier1_live.active.sunlight || tier1_live.active.point_fog)) volumetric_light->Reset();
+     if (gbuffer_draw && tier1_live.active.ssgi)
+         ssgi->OnGBufferDraw(db_desc.first, cb_descs[2].first, cb_descs[0].first);
+@@ -1932,6 +1935,7 @@
+     const auto& regs = Regs();
+     // bbport: the pass copying a finished frame to a display buffer; the previous draw's
+     // target is that frame.
++    if (regs.color_buffers[0] && FrameCapture::IsDisplayBuffer(regs.color_buffers[0].Address())) depth_of_field->Reset();
+     if (!camera_motion->Enabled() && regs.color_buffers[0] &&
+         FrameCapture::IsDisplayBuffer(regs.color_buffers[0].Address())) {
+         contact_shadow->OnFrameEnd();
+@@ -2169,6 +2173,7 @@
+     point_shadow->Flush(); // only the just-recorded light delta is shadowed
+     Tier1AfterDraw(pipeline);
+     if (spatial_ao->Enabled()) HqAoAfterDraw(pipeline, state);
++    if (BbSettings::Get().startup_dof_mode == 1) DepthOfFieldAfterDraw(pipeline,state);
+     if (FrameCapture::Active()) {
+         const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+         FrameCapture::Draw(vs_info.pgm_hash, ps ? ps->pgm_hash : 0, num_indices, num_instances);
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h b/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h
+@@ -45,6 +45,7 @@
+ class ContactShadow;
+ class VolumetricLight;
+ class PointShadow;
++class DepthOfField;
+ 
+ class Rasterizer {
+ public:
+@@ -581,6 +582,8 @@
+     std::unique_ptr<ContactShadow> contact_shadow;
+     std::unique_ptr<VolumetricLight> volumetric_light;
+     std::unique_ptr<PointShadow> point_shadow;
++    std::unique_ptr<DepthOfField> depth_of_field;
++    void DepthOfFieldAfterDraw(const GraphicsPipeline*,const RenderState&);
+     Tier1Live::FrameState tier1_live;
+     void Tier1ApplyLiveSettings(bool initial = false);
+     bool Tier1PointShadowBeforeDraw(const GraphicsPipeline*);
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc b/gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc
+@@ -256,3 +256,50 @@
+     std::printf("Tier 1 live: SSGI=%d contact=%d sunlight=%d point_fog=%d point_shadows=%d (frame boundary)\n",
+         int(active.ssgi),int(active.contact),int(active.sunlight),int(active.point_fog),int(active.point_shadows));
+ }
++
++void Rasterizer::DepthOfFieldAfterDraw(const GraphicsPipeline* pipeline, const RenderState& state) {
++    const auto* ps_info = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
++    if (!ps_info || !cb_descs[0].first || state.num_color_attachments != 1 || state.num_layers != 1 ||
++        (ps_info->pgm_hash != 0xf55643de && ps_info->pgm_hash != 0xfbe7c4b6 &&
++         ps_info->pgm_hash != 0xe80526cc && ps_info->pgm_hash != 0x9e1cb278)) {
++        return;
++    }
++    const auto& vs_info = pipeline->GetStage(Shader::SwStage::Vertex);
++    const auto first_buffer = [&](const Shader::Info& info) {
++        u32 first = 0;
++        for (const auto* stage : pipeline->GetStages()) {
++            if (stage == &info) {
++                break;
++            }
++            if (stage) {
++                first += u32(stage->buffers.size());
++            }
++        }
++        return first;
++    };
++    const u32 pixel = first_buffer(*ps_info), vertex = first_buffer(vs_info);
++    if (ps_info->buffers.empty() || pixel >= buffer_infos.size()) {
++        return;
++    }
++    const auto& constants = buffer_infos[pixel];
++    if (pixel >= push_data.buf_offsets.size()) return;
++    const u32 offset = push_data.buf_offsets[pixel];
++    if (ps_info->pgm_hash == 0xf55643de) {
++        depth_of_field->Camera(constants, offset);
++    } else if (ps_info->pgm_hash == 0xfbe7c4b6 && ps_info->images.size() == 3 &&
++               image_infos.size() >= 3) {
++        depth_of_field->Encode(cb_descs[0].first, image_infos[1]);
++    } else if (ps_info->pgm_hash == 0xe80526cc && vs_info.pgm_hash == 0x7e956bc3 &&
++               !vs_info.buffers.empty() && vertex < buffer_infos.size() && vertex < push_data.buf_offsets.size()) {
++        depth_of_field->Kernel(texture_cache.GetImage(cb_descs[0].first).info.guest_address,
++                               constants, offset, buffer_infos[vertex],
++                               push_data.buf_offsets[vertex]);
++    } else if (ps_info->pgm_hash == 0x9e1cb278 && vs_info.pgm_hash == 0xd3ca03f3 &&
++               ps_info->images.size() == 2 && image_infos.size() >= 2 &&
++               state.num_color_attachments == 1 && state.num_layers == 1) {
++        depth_of_field->Composite(cb_descs[0].first,
++                                  ps_info->images[0].GetSharp(*ps_info).Address(),
++                                  ps_info->images[1].GetSharp(*ps_info).Address(), image_infos[0],
++                                  constants, offset);
++    }
++}
+diff --git a/gpu/shim/bbport_overlay.cpp b/gpu/shim/bbport_overlay.cpp
+--- a/gpu/shim/bbport_overlay.cpp
++++ b/gpu/shim/bbport_overlay.cpp
+@@ -684,6 +684,14 @@
+             }
+             ImGui::EndCombo();
+         }
++    }
++    if (const char* label = Item("Depth of field mode (restart required)","Depth of field mode (restart required)","graphics_dof_mode")) {
++        static const char* modes[]={"Original DoF","Modern DoF"};
++        int value=s.graphics_dof_mode; if(ImGui::Combo(label,&value,modes,2)) Store(s.graphics_dof_mode,value,true);
++        Hint("Keep Depth of field (DoF) enabled. Modern mode follows the map's authored far blur; unsupported paths retain original DoF.");
++    }
++    if (const char* label = Item("DoF intensity (live in Modern mode)","DoF intensity (live in Modern mode)","graphics_dof_intensity")) {
++        float value=s.graphics_dof_intensity; if(ImGui::SliderFloat(label,&value,0.0f,3.0f)) Store(s.graphics_dof_intensity,value,true);
+     }
+     if (const char* label = Item("GTAO (restart required)", "GTAO (restart required)", "graphics_gtao")) {
+         Checkbox(label, s.graphics_gtao);
+@@ -2000,6 +2008,7 @@
+ 
+     const float footer_top = ImGui::GetCursorPosY();
+     bool restart =
++        s.graphics_dof_mode != s.startup_dof_mode ||
+         s.graphics_directional_filter != s.startup_directional_filter ||
+         s.graphics_shadow_resolution != s.startup_shadow_resolution ||
+         s.graphics_local_shadow_resolution != s.startup_local_shadow_resolution ||
+diff --git a/gpu/shim/bbport_settings.cpp b/gpu/shim/bbport_settings.cpp
+--- a/gpu/shim/bbport_settings.cpp
++++ b/gpu/shim/bbport_settings.cpp
+@@ -384,6 +384,10 @@
+         v.graphics_gi_strength = Clamp(std::isfinite(f) ? f : 6.0f, 0.0f, 12.0f);
+     } else if (key == "graphics_ssr_intensity") {
+         v.graphics_ssr_intensity = Clamp(std::isfinite(f) ? f : 1.0f, 0.0f, 3.0f);
++    } else if (key == "graphics_dof_mode") {
++        v.graphics_dof_mode = std::clamp(i,0,1);
++    } else if (key == "graphics_dof_intensity") {
++        v.graphics_dof_intensity = Clamp(std::isfinite(f) ? f : 1.0f,0.0f,3.0f);
+     } else if (key == "graphics_gtao") {
+         v.graphics_gtao = i != 0;
+     } else if (key == "graphics_controls") {
+@@ -563,7 +567,7 @@
+         &Values::hdr_ui_brightness, &Values::hdr_ui_color, &Values::render_scale, &Values::mip_bias,
+         &Values::graphics_brightness, &Values::graphics_contrast, &Values::graphics_saturation,
+         &Values::graphics_hue, &Values::graphics_fog, &Values::graphics_bloom,
+-        &Values::graphics_ao_strength, &Values::graphics_shadow_scale,
++        &Values::graphics_dof_intensity, &Values::graphics_ao_strength, &Values::graphics_shadow_scale,
+         &Values::graphics_gi_strength, &Values::graphics_ssr_intensity,
+         &Values::graphics_point_shadow_strength, &Values::graphics_contact_strength, &Values::graphics_volumetric_intensity, &Values::graphics_point_fog_intensity,
+         &Values::camera_fov_scale, &Values::camera_distance_scale, &Values::camera_height_scale,
+@@ -677,6 +681,7 @@
+     for (int e = 0; e < EffectCount; ++e) {
+         v.startup_effects[e] = v.effects[e];
+     }
++    v.startup_dof_mode = v.graphics_dof_mode;
+     v.startup_gtao = v.graphics_gtao;
+     v.startup_ao_quality = v.graphics_ao_quality;
+     v.startup_ssgi = v.graphics_ssgi;
+@@ -878,6 +883,8 @@
+     put("graphics_shadow_scale",fixed(v.graphics_shadow_scale,2));
+     put("graphics_bloom",fixed(v.graphics_bloom,2));
+     put("graphics_saturation",fixed(v.graphics_saturation,2));
++    put("graphics_dof_mode",std::to_string(v.graphics_dof_mode.load()));
++    put("graphics_dof_intensity",fixed(v.graphics_dof_intensity,2));
+     put("graphics_gtao",flag(v.graphics_gtao));
+     put("graphics_ao_quality",std::to_string(v.graphics_ao_quality.load()));
+     put("graphics_ssgi",flag(v.graphics_ssgi));
+diff --git a/gpu/shim/bbport_settings.h b/gpu/shim/bbport_settings.h
+--- a/gpu/shim/bbport_settings.h
++++ b/gpu/shim/bbport_settings.h
+@@ -241,6 +241,9 @@
+     /// Applied at start (patches.py); the menu shows when a restart is needed.
+     std::atomic<bool> effects[EffectCount]{};
+     // Shader substitution is frozen at startup; no extra AO images or passes.
++    std::atomic<int> graphics_dof_mode{0}; // Original=0, Modern=1 (restart)
++    int startup_dof_mode = 0;
++    std::atomic<float> graphics_dof_intensity{1.0f}; // live, independent of Picture tuning
+     std::atomic<bool> graphics_gtao{false};
+     bool startup_gtao = false;
+     std::atomic<int> graphics_ao_quality{0}; // 0 regular, 1 HQ (restart)
+diff --git a/tests/test_depth_of_field.cpp b/tests/test_depth_of_field.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/test_depth_of_field.cpp
+@@ -0,0 +1,651 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#include <vulkan/vulkan.h>
++
++#include <algorithm>
++#include <array>
++#include <cassert>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <limits>
++#include <span>
++#include <vector>
++
++#include "video_core/host_shaders/depth_of_field_camera_comp.h"
++#include "video_core/host_shaders/depth_of_field_snapshot_comp.h"
++#include "video_core/host_shaders/depth_of_field_kernel_comp.h"
++#include "video_core/host_shaders/depth_of_field_prepare_comp.h"
++#include "video_core/host_shaders/depth_of_field_gather_comp.h"
++#include "video_core/host_shaders/depth_of_field_composite_comp.h"
++#include "video_core/host_shaders/depth_of_field_focus_comp.h"
++#include "video_core/host_shaders/depth_of_field_near_tiles_comp.h"
++#include "video_core/host_shaders/depth_of_field_near_comp.h"
++
++namespace {
++#define CHECK(call) do { \
++    const VkResult result = (call); \
++    if (result != VK_SUCCESS) { \
++        std::fprintf(stderr, "%s: Vulkan error %d\n", #call, int(result)); \
++        std::exit(1); \
++    } \
++} while (false)
++
++constexpr uint32_t W = 257, H = 145, HW = (W + 1) / 2, HH = (H + 1) / 2;
++struct Params {
++    uint32_t cb, vb, width, height;
++    float intensity = 1.0f, delta_seconds = 1.0f / 60.0f;
++    uint32_t reset_focus = 1;
++    uint32_t tile_size = 0;
++};
++
++uint16_t Half(float value) {
++    uint32_t bits;
++    std::memcpy(&bits, &value, 4);
++    uint32_t sign = (bits >> 16) & 0x8000;
++    int exp = int((bits >> 23) & 255) - 112;
++    uint32_t mantissa = bits & 0x7fffff;
++    if (exp >= 31) return uint16_t(sign | 0x7c00 | (mantissa ? 0x200 : 0));
++    if (exp <= 0) {
++        if (exp < -10) return uint16_t(sign);
++        mantissa |= 0x800000;
++        return uint16_t(sign | ((mantissa + (1u << (13 - exp))) >> (14 - exp)));
++    }
++    return uint16_t(sign | ((uint32_t(exp) << 10 | mantissa >> 13) + ((mantissa >> 12) & 1)));
++}
++float Float(uint16_t h) {
++    int e = (h >> 10) & 31;
++    float m = float(h & 1023), s = h & 0x8000 ? -1.0f : 1.0f;
++    return s * (e == 0 ? std::ldexp(m, -24) : std::ldexp(1.0f + m / 1024, e - 15));
++}
++
++struct Buffer { VkBuffer buffer{}; VkDeviceMemory memory{}; void* data{}; VkDeviceSize size{}; };
++struct Image {
++    VkImage image{};
++    VkDeviceMemory memory{};
++    VkImageView view{};
++    uint32_t width, height, bytes;
++};
++struct Pass { VkPipelineLayout layout{}; VkPipeline pipeline{}; VkDescriptorSet set{}; };
++
++struct Test {
++    VkInstance instance{};
++    VkPhysicalDevice physical{};
++    VkPhysicalDeviceMemoryProperties memory{};
++    VkDevice device{};
++    VkQueue queue{};
++    VkCommandPool pool{};
++    VkCommandBuffer cmd{};
++    VkDescriptorSetLayout set_layout{};
++    VkDescriptorPool descriptors{};
++    VkSampler sampler{};
++    std::vector<Buffer> buffers;
++    std::vector<Image> images;
++    std::array<Pass, 9> passes{};
++    const std::array<VkDescriptorType, 15> types{
++        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
++        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
++        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
++        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
++        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
++        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
++        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
++        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER};
++
++    uint32_t Memory(uint32_t bits, VkMemoryPropertyFlags flags) {
++        for (uint32_t i = 0; i < memory.memoryTypeCount; ++i)
++            if ((bits & (1u << i)) && (memory.memoryTypes[i].propertyFlags & flags) == flags)
++                return i;
++        std::abort();
++    }
++    Test() {
++        const VkApplicationInfo app{.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
++            .pApplicationName = "depth-of-field-shader-test", .apiVersion = VK_API_VERSION_1_3};
++        const VkInstanceCreateInfo ci{.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
++            .pApplicationInfo = &app};
++        CHECK(vkCreateInstance(&ci, nullptr, &instance));
++        uint32_t count = 0;
++        CHECK(vkEnumeratePhysicalDevices(instance, &count, nullptr));
++        std::vector<VkPhysicalDevice> devices(count);
++        CHECK(vkEnumeratePhysicalDevices(instance, &count, devices.data()));
++        uint32_t family = 0;
++        for (auto gpu : devices) {
++            uint32_t n = 0;
++            vkGetPhysicalDeviceQueueFamilyProperties(gpu, &n, nullptr);
++            std::vector<VkQueueFamilyProperties> families(n);
++            vkGetPhysicalDeviceQueueFamilyProperties(gpu, &n, families.data());
++            for (uint32_t i = 0; i < n; ++i) {
++                if (families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
++                    physical = gpu;
++                    family = i;
++                    break;
++                }
++            }
++            if (physical) break;
++        }
++        assert(physical);
++        VkPhysicalDeviceProperties properties;
++        vkGetPhysicalDeviceProperties(physical, &properties);
++        std::printf("DOF shader tests: %s\n", properties.deviceName);
++        vkGetPhysicalDeviceMemoryProperties(physical, &memory);
++        const float priority = 1;
++        const VkDeviceQueueCreateInfo qi{.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
++            .queueFamilyIndex = family, .queueCount = 1, .pQueuePriorities = &priority};
++        const VkPhysicalDeviceFeatures features{.shaderStorageImageExtendedFormats = VK_TRUE};
++        const VkDeviceCreateInfo di{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
++            .queueCreateInfoCount = 1, .pQueueCreateInfos = &qi, .pEnabledFeatures = &features};
++        CHECK(vkCreateDevice(physical, &di, nullptr, &device));
++        vkGetDeviceQueue(device, family, 0, &queue);
++        const VkCommandPoolCreateInfo pi{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
++            .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = family};
++        CHECK(vkCreateCommandPool(device, &pi, nullptr, &pool));
++        const VkCommandBufferAllocateInfo ai{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
++            .commandPool = pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1};
++        CHECK(vkAllocateCommandBuffers(device, &ai, &cmd));
++        std::array<VkDescriptorSetLayoutBinding, 15> bindings{};
++        for (uint32_t i = 0; i < types.size(); ++i)
++            bindings[i] = {i, types[i], 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
++        const VkDescriptorSetLayoutCreateInfo li{
++            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
++            .bindingCount = uint32_t(bindings.size()), .pBindings = bindings.data()};
++        CHECK(vkCreateDescriptorSetLayout(device, &li, nullptr, &set_layout));
++        const std::array<VkDescriptorPoolSize, 3> sizes{{
++            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 27}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 54},
++            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 54}}};
++        const VkDescriptorPoolCreateInfo dpi{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
++            .maxSets = 9, .poolSizeCount = uint32_t(sizes.size()), .pPoolSizes = sizes.data()};
++        CHECK(vkCreateDescriptorPool(device, &dpi, nullptr, &descriptors));
++        const VkSamplerCreateInfo si{.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
++            .magFilter = VK_FILTER_NEAREST, .minFilter = VK_FILTER_NEAREST,
++            .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
++            .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
++            .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
++            .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
++        CHECK(vkCreateSampler(device, &si, nullptr, &sampler));
++        const std::array<std::span<const uint32_t>, 9> codes{
++            DEPTH_OF_FIELD_CAMERA_COMP, DEPTH_OF_FIELD_SNAPSHOT_COMP, DEPTH_OF_FIELD_KERNEL_COMP,
++            DEPTH_OF_FIELD_PREPARE_COMP, DEPTH_OF_FIELD_GATHER_COMP, DEPTH_OF_FIELD_COMPOSITE_COMP,
++            DEPTH_OF_FIELD_FOCUS_COMP, DEPTH_OF_FIELD_NEAR_TILES_COMP, DEPTH_OF_FIELD_NEAR_COMP};
++        for (size_t i = 0; i < passes.size(); ++i) {
++            auto& pass = passes[i];
++            const VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Params)};
++            const VkPipelineLayoutCreateInfo layout{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
++                .setLayoutCount = 1, .pSetLayouts = &set_layout,
++                .pushConstantRangeCount = 1, .pPushConstantRanges = &range};
++            CHECK(vkCreatePipelineLayout(device, &layout, nullptr, &pass.layout));
++            const VkShaderModuleCreateInfo mi{.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
++                .codeSize = codes[i].size_bytes(), .pCode = codes[i].data()};
++            VkShaderModule module;
++            CHECK(vkCreateShaderModule(device, &mi, nullptr, &module));
++            const VkComputePipelineCreateInfo pipeline{.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
++                .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
++                          .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = module, .pName = "main"},
++                .layout = pass.layout};
++            CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline, nullptr, &pass.pipeline));
++            vkDestroyShaderModule(device, module, nullptr);
++            const VkDescriptorSetAllocateInfo alloc{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
++                .descriptorPool = descriptors, .descriptorSetCount = 1, .pSetLayouts = &set_layout};
++            CHECK(vkAllocateDescriptorSets(device, &alloc, &pass.set));
++        }
++    }
++    ~Test() {
++        CHECK(vkDeviceWaitIdle(device));
++        for (const auto& p : passes) {
++            vkDestroyPipeline(device, p.pipeline, nullptr);
++            vkDestroyPipelineLayout(device, p.layout, nullptr);
++        }
++        for (const auto& image : images) {
++            vkDestroyImageView(device, image.view, nullptr);
++            vkDestroyImage(device, image.image, nullptr);
++            vkFreeMemory(device, image.memory, nullptr);
++        }
++        for (const auto& buffer : buffers) {
++            vkUnmapMemory(device, buffer.memory);
++            vkDestroyBuffer(device, buffer.buffer, nullptr);
++            vkFreeMemory(device, buffer.memory, nullptr);
++        }
++        vkDestroySampler(device, sampler, nullptr);
++        vkDestroyDescriptorPool(device, descriptors, nullptr);
++        vkDestroyDescriptorSetLayout(device, set_layout, nullptr);
++        vkDestroyCommandPool(device, pool, nullptr);
++        vkDestroyDevice(device, nullptr);
++        vkDestroyInstance(instance, nullptr);
++    }
++    Buffer MakeBuffer(VkDeviceSize size) {
++        Buffer buffer{.size = size};
++        const VkBufferCreateInfo ci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size,
++            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
++                     VK_BUFFER_USAGE_TRANSFER_DST_BIT};
++        CHECK(vkCreateBuffer(device, &ci, nullptr, &buffer.buffer));
++        VkMemoryRequirements r;
++        vkGetBufferMemoryRequirements(device, buffer.buffer, &r);
++        const VkMemoryAllocateInfo ai{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
++            .allocationSize = r.size, .memoryTypeIndex = Memory(r.memoryTypeBits,
++                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
++        CHECK(vkAllocateMemory(device, &ai, nullptr, &buffer.memory));
++        CHECK(vkBindBufferMemory(device, buffer.buffer, buffer.memory, 0));
++        CHECK(vkMapMemory(device, buffer.memory, 0, VK_WHOLE_SIZE, 0, &buffer.data));
++        std::memset(buffer.data, 0, size_t(size));
++        buffers.push_back(buffer);
++        return buffer;
++    }
++    Image MakeImage(uint32_t w, uint32_t h, bool color) {
++        Image image{.width = w, .height = h, .bytes = color ? 8u : 4u};
++        const auto format = color ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R32_SFLOAT;
++        const VkImageCreateInfo ci{.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
++            .imageType = VK_IMAGE_TYPE_2D, .format = format, .extent = {w, h, 1},
++            .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
++            .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = VK_IMAGE_USAGE_STORAGE_BIT |
++                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT};
++        CHECK(vkCreateImage(device, &ci, nullptr, &image.image));
++        VkMemoryRequirements r;
++        vkGetImageMemoryRequirements(device, image.image, &r);
++        const VkMemoryAllocateInfo ai{.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
++            .allocationSize = r.size, .memoryTypeIndex = Memory(r.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
++        CHECK(vkAllocateMemory(device, &ai, nullptr, &image.memory));
++        CHECK(vkBindImageMemory(device, image.image, image.memory, 0));
++        const VkImageViewCreateInfo vi{.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
++            .image = image.image, .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = format,
++            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
++        CHECK(vkCreateImageView(device, &vi, nullptr, &image.view));
++        images.push_back(image);
++        return image;
++    }
++    void Begin() {
++        CHECK(vkResetCommandBuffer(cmd, 0));
++        const VkCommandBufferBeginInfo bi{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
++        CHECK(vkBeginCommandBuffer(cmd, &bi));
++    }
++    void Barrier() {
++        const VkMemoryBarrier b{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
++            .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
++            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT};
++        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
++                             0, 1, &b, 0, nullptr, 0, nullptr);
++    }
++    void Submit() {
++        CHECK(vkEndCommandBuffer(cmd));
++        const VkSubmitInfo si{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
++            .commandBufferCount = 1, .pCommandBuffers = &cmd};
++        CHECK(vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE));
++        CHECK(vkQueueWaitIdle(queue));
++    }
++    void Upload(const Buffer& staging, const Image& image, const void* data) {
++        std::memcpy(staging.data, data, size_t(image.width) * image.height * image.bytes);
++        Begin();
++        const VkBufferImageCopy copy{.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
++            .imageExtent = {image.width, image.height, 1}};
++        vkCmdCopyBufferToImage(cmd, staging.buffer, image.image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
++        Barrier();
++        Submit();
++    }
++    void Bind(uint32_t stage, const std::array<Buffer, 3>& bs,
++              const std::array<Image, 12>& im) {
++        std::array<VkDescriptorBufferInfo, 3> bi;
++        std::array<VkDescriptorImageInfo, 12> ii;
++        std::array<VkWriteDescriptorSet, 15> writes{};
++        for (uint32_t i = 0; i < writes.size(); ++i) {
++            writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
++                .dstSet = passes[stage].set, .dstBinding = i, .descriptorCount = 1,
++                .descriptorType = types[i]};
++            if (i < 3) {
++                bi[i] = {bs[i].buffer, 0, bs[i].size};
++                writes[i].pBufferInfo = &bi[i];
++            } else {
++                ii[i - 3] = {types[i] == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ? sampler : VK_NULL_HANDLE,
++                             im[i - 3].view, VK_IMAGE_LAYOUT_GENERAL};
++                writes[i].pImageInfo = &ii[i - 3];
++            }
++        }
++        vkUpdateDescriptorSets(device, uint32_t(writes.size()), writes.data(), 0, nullptr);
++    }
++    void Dispatch(uint32_t stage, Params params, uint32_t w, uint32_t h) {
++        const auto& p = passes[stage];
++        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.pipeline);
++        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.layout, 0, 1, &p.set, 0, nullptr);
++        vkCmdPushConstants(cmd, p.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(params), &params);
++        vkCmdDispatch(cmd, w, h, 1);
++        Barrier();
++    }
++    std::vector<uint16_t> Download(const Buffer& staging, const Image& image) {
++        Begin();
++        const VkBufferImageCopy copy{.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
++            .imageExtent = {image.width, image.height, 1}};
++        vkCmdCopyImageToBuffer(cmd, image.image, VK_IMAGE_LAYOUT_GENERAL, staging.buffer, 1, &copy);
++        Barrier();
++        Submit();
++        std::vector<uint16_t> out(size_t(image.width) * image.height * image.bytes / 2);
++        std::memcpy(out.data(), staging.data, out.size() * 2);
++        return out;
++    }
++};
++} // namespace
++
++int main() {
++    Test t;
++    const auto cb = t.MakeBuffer(4112 + 16), vb = t.MakeBuffer(4112 + 16), state = t.MakeBuffer(48);
++    const auto staging = t.MakeBuffer(W * H * 8);
++    auto* constants = static_cast<float*>(cb.data);
++    auto* vertex = static_cast<float*>(vb.data);
++    auto* gpu = static_cast<float*>(state.data);
++    // Nonzero offsets exercise the same alignment adjustment as live constant-ring bindings.
++    constexpr uint32_t C = 3, V = 2;
++    constants[C + 11] = 1;
++    constants[C + 14] = -20;
++    constants[C + 15] = 20.001f;
++    constants[C + 76] = 1;
++    for (uint32_t i = 0; i < 7; ++i) {
++        const float angle = float(i - 1) * 1.04719755f;
++        vertex[V + 136 + 4 * i] = i == 0 ? 0 : 3.0f * std::cos(angle) / W;
++        vertex[V + 137 + 4 * i] = i == 0 ? 0 : 3.0f * std::sin(angle) / H;
++        for (uint32_t channel = 0; channel < 4; ++channel)
++            constants[C + 616 + 4 * i + channel] = 1.0f / 7;
++    }
++    const auto sharp = t.MakeImage(W, H, true), raw_depth = t.MakeImage(W, H, false);
++    const auto depth = t.MakeImage(W, H, false), prep = t.MakeImage(HW, HH, true);
++    const auto half_depth = t.MakeImage(HW, HH, false), blur = t.MakeImage(HW, HH, true);
++    const auto output = t.MakeImage(W, H, true);
++    const auto tiles = t.MakeImage(W, H, false);
++    t.Begin();
++    for (const auto& image : t.images) {
++        const VkImageMemoryBarrier barrier{.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
++            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
++            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_GENERAL,
++            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
++            .image = image.image, .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
++        vkCmdPipelineBarrier(t.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
++                             0, 0, nullptr, 0, nullptr, 1, &barrier);
++    }
++    t.Submit();
++    for (uint32_t i = 0; i < 9; ++i) {
++        t.Bind(i, {cb, vb, state},
++            {sharp, i == 1 ? raw_depth : depth, prep, half_depth, blur,
++             depth, prep, half_depth, blur, output, tiles, tiles});
++    }
++    std::vector<uint16_t> source(W * H * 4), stock(source.size());
++    std::vector<float> depths(W * H);
++    const auto fill = [&](bool edge, float q) {
++        for (uint32_t y = 0; y < H; ++y) {
++            for (uint32_t x = 0; x < W; ++x) {
++                const uint32_t p = y * W + x;
++                const bool foreground = edge && x < 24;
++                source[4 * p] = Half(foreground ? 8 : 0);
++                source[4 * p + 1] = Half(0);
++                source[4 * p + 2] = Half(foreground ? 0 : 4);
++                source[4 * p + 3] = Half(foreground ? 0 : q);
++                for (uint32_t c = 0; c < 3; ++c) stock[4 * p + c] = source[4 * p + c];
++                stock[4 * p + 3] = Half(0.125f + float(p % 7) * 0.125f);
++                float z = foreground ? 2 : 100;
++                depths[p] = (1.0f / z - constants[C + 15]) / constants[C + 14];
++            }
++        }
++    };
++    const auto run = [&](float intensity = 1.0f, bool reset = true, float dt = 1.0f / 60.0f,
++                         bool enable_near = true) {
++        t.Upload(staging, sharp, source.data());
++        t.Upload(staging, output, stock.data());
++        t.Upload(staging, raw_depth, depths.data());
++        t.Begin();
++        const uint32_t tile_size = uint32_t(std::ceil((10.0f / 1080) * H * intensity)) + 1;
++        Params p{C, V, W, H, intensity, dt, uint32_t(reset), tile_size};
++        t.Dispatch(0, p, 1, 1);
++        t.Dispatch(1, p, (W + 7) / 8, (H + 7) / 8);
++        t.Dispatch(2, p, 1, 1);
++        t.Dispatch(6, p, 1, 1);
++        t.Dispatch(3, p, (HW + 7) / 8, (HH + 7) / 8);
++        t.Dispatch(4, p, (HW + 7) / 8, (HH + 7) / 8);
++        t.Dispatch(5, p, (W + 7) / 8, (H + 7) / 8);
++        if (intensity > 0 && enable_near) {
++            t.Dispatch(7, p, (W + tile_size - 1) / tile_size, (H + tile_size - 1) / tile_size);
++            t.Dispatch(8, p, (W + 7) / 8, (H + 7) / 8);
++        }
++        t.Submit();
++        return t.Download(staging, output);
++    };
++    fill(false, 2);
++    auto out = run();
++    assert(gpu[3] == 1 && gpu[7] == 1);
++    const float expected = 6 * std::sqrt(3.0f / 7);
++    assert(std::abs(gpu[0] * W - expected) < 0.001f);
++    assert(std::abs(gpu[2] * H - expected) < 0.001f);
++    for (uint32_t p = 0; p < W * H; ++p) {
++        assert(out[4 * p + 3] == stock[4 * p + 3]);
++        assert(Float(out[4 * p + 2]) == 4);
++    }
++    fill(true, 2);
++    out = run();
++    assert(out == stock); // Constant layers stay constant; no red foreground bleed into blue.
++    for (uint32_t leaf_x : {24u, 25u}) {
++        fill(false, 2);
++        for (uint32_t y = 0; y < H; ++y) {
++            const uint32_t leaf = y * W + leaf_x;
++            source[4 * leaf] = Half(8);
++            source[4 * leaf + 2] = Half(0);
++            source[4 * leaf + 3] = Half(0);
++            stock[4 * leaf] = Half(8);
++            stock[4 * leaf + 2] = Half(0);
++            depths[leaf] = (0.5f - constants[C + 15]) / constants[C + 14];
++            // Make stock fallback distinguishable from a successful edge repair.
++            stock[4 * (leaf + 1) + 2] = Half(0.25f);
++        }
++        out = run();
++        for (uint32_t y = 0; y < H; ++y) {
++            const uint32_t leaf = y * W + leaf_x;
++            assert(out[4 * leaf] == Half(8) && out[4 * leaf + 2] == Half(0));
++            assert(out[4 * (leaf + 1)] == Half(0));
++            assert(Float(out[4 * (leaf + 1) + 2]) > 3.99f);
++            assert(out[4 * (leaf + 1) + 3] == stock[4 * (leaf + 1) + 3]);
++        }
++    }
++    for (float q : {0.0f, 0.75f, -2.0f}) {
++        fill(false, q);
++        for (uint32_t p = 0; p < W * H; ++p) stock[4 * p + 2] = Half(0.25f);
++        assert(run() == stock); // Focused and unverified near paths are untouched.
++    }
++    fill(false, 2);
++    for (uint32_t p = 0; p < W * H; ++p) stock[4 * p + 2] = Half(0.25f);
++    constants[C + 616] = std::numeric_limits<float>::quiet_NaN();
++    assert(run() == stock);
++    assert(gpu[3] == 0);
++    constants[C + 616] = 1.0f / 7;
++    constants[C + 11] = 0;
++    assert(run() == stock);
++    constants[C + 11] = 1;
++    constants[C + 76] = 0;
++    assert(run() == stock);
++    constants[C + 76] = 1;
++    fill(false, 2);
++    for (uint32_t y = 0; y < H; ++y) {
++        for (uint32_t x = 0; x < W; ++x) {
++            const uint32_t p = y * W + x;
++            source[4 * p + 2] = Half(((x / 2 + y / 2) & 1) ? 4 : 0);
++            stock[4 * p + 2] = source[4 * p + 2];
++        }
++    }
++    out = run();
++    double before = 0, after = 0;
++    for (uint32_t p = 0; p < W * H; ++p) {
++        before += std::abs(Float(stock[4 * p + 2]) - 2);
++        after += std::abs(Float(out[4 * p + 2]) - 2);
++        assert(out[4 * p + 3] == stock[4 * p + 3]);
++    }
++    assert(after < before * 0.5);
++    const auto zero = run(0.0f);
++    for (uint32_t p = 0; p < W * H; ++p) {
++        for (uint32_t c = 0; c < 3; ++c)
++            assert(zero[4 * p + c] == source[4 * p + c]);
++        assert(zero[4 * p + 3] == stock[4 * p + 3]);
++    }
++    // Measure the impulse's spread, not just a changed output checksum.
++    fill(false, 2);
++    for (uint32_t p = 0; p < W * H; ++p)
++        source[4 * p + 2] = stock[4 * p + 2] = Half(0);
++    for (uint32_t y = 14; y < 18; ++y)
++        for (uint32_t x = 30; x < 34; ++x)
++            source[4 * (y * W + x) + 2] = stock[4 * (y * W + x) + 2] = Half(4);
++    const auto moment = [&](float intensity) {
++        const auto image = run(intensity);
++        double mass = 0, second = 0;
++        for (uint32_t y = 0; y < H; ++y) {
++            for (uint32_t x = 0; x < W; ++x) {
++                const double value = Float(image[4 * (y * W + x) + 2]);
++                mass += value;
++                second += value * ((x - 31.5) * (x - 31.5) + (y - 15.5) * (y - 15.5));
++            }
++        }
++        assert(mass > 0);
++        return second / mass;
++    };
++    const double low = moment(0.5f), normal = moment(1.0f), high = moment(3.0f);
++    assert(low < normal && normal < high);
++    fill(false, -2);
++    for (uint32_t p = 0; p < W * H; ++p) stock[4 * p + 2] = Half(0.0f);
++    const auto reduced = run(0.5f);
++    for (uint32_t p = 0; p < W * H; ++p)
++        assert(reduced[4 * p + 2] == Half(2.0f));
++    // Autofocus uses a robust upper-centre median, not a single pixel or the hunter below it.
++    const auto set_distance = [&](float z) {
++        std::fill(depths.begin(), depths.end(), (1.0f / z - constants[C + 15]) / constants[C + 14]);
++    };
++    fill(false, 0);
++    set_distance(10);
++    run();
++    assert(gpu[9] == 1 && std::abs(1.0f / gpu[8] - 10) < 0.02f);
++    depths[uint32_t(0.32f * H) * W + uint32_t(0.5f * W)] =
++        (1.0f / 0.2f - constants[C + 15]) / constants[C + 14];
++    run();
++    assert(std::abs(1.0f / gpu[8] - 10) < 0.02f);
++    for (uint32_t y = H / 2; y < H; ++y)
++        for (uint32_t x = W / 3; x < 2 * W / 3; ++x)
++            depths[y * W + x] = (2.0f - constants[C + 15]) / constants[C + 14];
++    run();
++    assert(std::abs(1.0f / gpu[8] - 10) < 0.02f);
++    set_distance(4);
++    run(1, false);
++    assert(1.0f / gpu[8] > 4 && 1.0f / gpu[8] < 10);
++    for (int i = 0; i < 90; ++i) run(1, false);
++    assert(std::abs(1.0f / gpu[8] - 4) < 0.15f);
++    set_distance(10);
++    run();
++    set_distance(4);
++    for (int i = 0; i < 30; ++i) run(1, false, 1.0f / 30);
++    const float thirty_hz = gpu[8];
++    set_distance(10);
++    run();
++    set_distance(4);
++    for (int i = 0; i < 60; ++i) run(1, false, 1.0f / 60);
++    assert(std::abs(gpu[8] - thirty_hz) < 0.002f);
++    std::fill(depths.begin(), depths.end(), 1.0f);
++    run();
++    assert(std::abs(1.0f / gpu[8] - 30) < 0.01f);
++    // A close HDR checkerboard blurs despite a zero authored far curve.
++    fill(false, 0);
++    set_distance(10);
++    for (uint32_t y = 8; y < 38; ++y) {
++        for (uint32_t x = 20; x < 70; ++x) {
++            const uint32_t p = y * W + x;
++            source[4 * p] = stock[4 * p] = Half(((x + y) & 1) ? 8 : 0);
++            source[4 * p + 2] = stock[4 * p + 2] = Half(0);
++            depths[p] = (1.0f / 0.3f - constants[C + 15]) / constants[C + 14];
++        }
++    }
++    out = run(3);
++    before = after = 0;
++    for (uint32_t y = 13; y < 33; ++y) {
++        for (uint32_t x = 25; x < 65; ++x) {
++            const uint32_t p = y * W + x;
++            before += std::abs(Float(stock[4 * p]) - 4);
++            after += std::abs(Float(out[4 * p]) - 4);
++            assert(out[4 * p + 3] == stock[4 * p + 3]);
++            assert(Float(out[4 * p + 2]) == 0);
++        }
++    }
++    assert(after < before * 0.5);
++    // A nearer sharp occluder cannot receive blur from the defocused patch behind it.
++    for (uint32_t y = 8; y < 38; ++y) {
++        const uint32_t p = y * W + 45;
++        source[4 * p] = stock[4 * p] = Half(0);
++        source[4 * p + 1] = stock[4 * p + 1] = Half(6);
++        depths[p] = (1.0f / 0.15f - constants[C + 15]) / constants[C + 14];
++    }
++    out = run(3);
++    for (uint32_t y = 13; y < 33; ++y) {
++        const uint32_t p = y * W + 45;
++        assert(Float(out[4 * p]) == 0);
++        const float green = Float(out[4 * p + 1]);
++        if (std::abs(green - 6) > 0.01f)
++            std::fprintf(stderr, "Near occlusion: y=%u red=%g green=%g\n",
++                         y, Float(out[4 * p]), green);
++        assert(std::abs(green - 6) <= 0.01f);
++        assert(out[4 * p + 3] == stock[4 * p + 3]);
++    }
++    // An in-focus surface remains unchanged when no near layer can cover it.
++    for (uint32_t y = 0; y < H; ++y)
++        for (uint32_t x = 150; x < W; ++x) {
++            const uint32_t p = y * W + x;
++            assert(out[4 * p] == stock[4 * p]);
++            assert(out[4 * p + 2] == stock[4 * p + 2]);
++        }
++    const auto near_zero = run(0);
++    for (uint32_t p = 0; p < W * H; ++p) {
++        for (uint32_t c = 0; c < 3; ++c) assert(near_zero[4 * p + c] == source[4 * p + c]);
++        assert(near_zero[4 * p + 3] == stock[4 * p + 3]);
++    }
++    // Conservative tile dilation must not sharpen far bokeh outside foreground coverage.
++    fill(false, 2);
++    set_distance(10);
++    for (uint32_t y = 0; y < H; ++y) {
++        for (uint32_t x = 0; x < W; ++x) {
++            const uint32_t p = y * W + x;
++            source[4 * p + 2] = stock[4 * p + 2] = Half(((x + y) & 1) ? 4 : 0);
++            if (x >= 20 && x < 70 && y >= 8 && y < 38) {
++                source[4 * p] = stock[4 * p] = Half(8);
++                source[4 * p + 2] = stock[4 * p + 2] = Half(0);
++                source[4 * p + 3] = Half(0);
++                depths[p] = (1.0f / 0.3f - constants[C + 15]) / constants[C + 14];
++            }
++        }
++    }
++    const auto far_only = run(3, true, 1.0f / 60, false);
++    out = run(3);
++    for (uint32_t y = 13; y < 33; ++y) {
++        for (uint32_t x = 75; x < 85; ++x) {
++            const uint32_t p = y * W + x;
++            for (uint32_t c = 0; c < 4; ++c) assert(out[4 * p + c] == far_only[4 * p + c]);
++        }
++    }
++    // Close-up head, shoulders and cloak stay sharp even at maximum intensity.
++    fill(false, 0);
++    set_distance(0.3f);
++    for (uint32_t y = 0; y < H; ++y)
++        for (uint32_t x = 0; x < W; ++x) {
++            const uint32_t p = y * W + x;
++            source[4 * p] = stock[4 * p] = Half(((x + y) & 1) ? 8 : 0);
++        }
++    out = run(3);
++    for (const auto& region : std::array<std::array<float, 4>, 3>{{
++             {0.40f, 0.60f, 0.00f, 0.35f},
++             {0.27f, 0.73f, 0.45f, 0.65f},
++             {0.09f, 0.91f, 0.85f, 1.00f}}}) {
++        for (uint32_t y = uint32_t(region[2] * H); y < uint32_t(region[3] * H); ++y)
++            for (uint32_t x = uint32_t(region[0] * W); x < uint32_t(region[1] * W); ++x) {
++                const uint32_t p = y * W + x;
++                for (uint32_t c = 0; c < 4; ++c) assert(out[4 * p + c] == stock[4 * p + c]);
++            }
++    }
++    before = after = 0;
++    for (uint32_t y = 8; y < 28; ++y)
++        for (uint32_t x = 8; x < 48; ++x) {
++            const uint32_t p = y * W + x;
++            before += std::abs(Float(stock[4 * p]) - 4);
++            after += std::abs(Float(out[4 * p]) - 4);
++        }
++    assert(after < before * 0.5);
++    constants[C + 11] = 0;
++    assert(run() == stock);
++    assert(gpu[9] == 0);
++    std::printf("PASS: calibrated radius, odd extents, HDR/alpha, focused/near fallback, "
++                "foreground rejection, subpixel foliage repair, invalid-layout fallback "
++                "and bokeh filtering; autofocus median, time-based convergence, sky fallback, "
++                "near-only blur, near occlusion, close-up subject protection and zero intensity\n");
++}
+diff --git a/tests/test_settings.cpp b/tests/test_settings.cpp
+--- a/tests/test_settings.cpp
++++ b/tests/test_settings.cpp
+@@ -37,6 +37,21 @@
+     BbSettings::Load();
+     auto& s = BbSettings::Get();
+     assert(s.upscaler == BbSettings::UpscalerFsr3 && !s.show_fps && s.menu_x < 0.0f);
++    assert(s.graphics_dof_mode==0 && s.startup_dof_mode==0 && s.graphics_dof_intensity==1.0f);
++    s.graphics_dof_mode=1; s.graphics_dof_intensity=2.5f;
++    assert(BbSettings::Save()); BbSettings::Load();
++    assert(s.startup_dof_mode==1 && s.graphics_dof_intensity==2.5f);
++    assert(BbSettings::SliderDefault(s.graphics_dof_intensity)==1.0f);
++    std::string dof_error;
++    BbSettings::PresetDocument dof_preset{"DoF",{{"graphics_dof_mode","0"},{"graphics_dof_intensity","0"}}};
++    assert(BbSettings::ApplyPreset(dof_preset,dof_error));
++    assert(s.graphics_dof_mode==0 && s.graphics_dof_intensity==0 && s.startup_dof_mode==1);
++    dof_preset.settings[1].second="3.1";
++    assert(!BbSettings::ApplyPreset(dof_preset,dof_error) && s.graphics_dof_intensity==0);
++    dof_preset.settings[1].second="nan";
++    assert(!BbSettings::ApplyPreset(dof_preset,dof_error));
++    s.graphics_dof_intensity=1.0f;
++    assert(BbSettings::Save()); BbSettings::Load(); assert(s.startup_dof_mode==0);
+     assert(!s.graphics_point_shadows && !s.startup_point_shadows);
+     assert(s.graphics_point_shadow_strength==0.85f);
+     s.graphics_point_shadows=true; s.graphics_point_shadow_strength=0.6f;

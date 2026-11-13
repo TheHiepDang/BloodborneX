@@ -1,0 +1,76 @@
+{
+  "description": "T2-01 map-driven DoF after the complete Tier 1/live supplement chain.",
+  "bloodbornex_commit": "e0f47880f1c88a31b7288ce852d9ce4e88dc90e9",
+  "source_repository": "fromsoftserve/BBFSS",
+  "source_branch": "beta",
+  "source_commit": "306221668207a5b38c825ed6a28f66fbefed192a",
+  "original_branch_commit": "42bbde58126cf0e94c6cdaae149ccc0a788e4713",
+  "optimization_commit": "184ca51997693e84d7a8c12b245809b945bf44c0",
+  "files": [
+    {
+      "path": "gpu/CMakeLists.txt",
+      "baseline_sha256": "01e6e56cfba9c7b2a6e129e9573d72b3d8243ff4c4eb56085856d326efb11859",
+      "modified_sha256": "bd4416a3910c215fde75e6c52a3bc36929deb466588375280d6792c64df4d68e"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/depth_of_field.comp",
+      "baseline_sha256": null,
+      "modified_sha256": "8c9687d52c211873f9638f556e26dd5ffdbe06806130fcdcd48d6dcdf3efeda8"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "fac4e69ce8f0415ebb05d4f1cde5001402ae3def95dcacad8e0eba9ad9802a5b"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_depth_of_field.h",
+      "baseline_sha256": null,
+      "modified_sha256": "4dfbce4cef73e72b4cb55201a6634d9178e406598d54ee3c3eccb6013da9eb52"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_effect_pass.h",
+      "baseline_sha256": "3815d9ab50fc197af98ad87fb3b06431a45d58226521b603b58e15ef7a2355e7",
+      "modified_sha256": "556d6ae15bf194ff517ab0cb18fbf4a2c49b1288296704d76023ba49c4e6fc6a"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.cpp",
+      "baseline_sha256": "8823414c23240c961d5c523f6c0524d23741278b50c8b0f81dd03591625677f2",
+      "modified_sha256": "0c2a8584c40cd01e2d38c6fa8424b73d4c67f4ca0cddae5e6e41cda9098d266d"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_rasterizer.h",
+      "baseline_sha256": "e8f1f11bd9714980c764d89c5105c593e6caf3e49b8d8dd1c509519128f4a0de",
+      "modified_sha256": "636ebb805f1db97b4ef4e9db94ff609db6ae131af4631d95fda72438c338b01e"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_tier1_effects.inc",
+      "baseline_sha256": "8f206eb4f8d992fb714b09c48c37847a3efe34645c87a626bfd3fd587725dcd9",
+      "modified_sha256": "3a7307d188063adc9116ff18363985d200f076dbebbd610fc078611725931e8e"
+    },
+    {
+      "path": "gpu/shim/bbport_overlay.cpp",
+      "baseline_sha256": "0c16916c0f1abb941227c8ba3387b99c0147863d541a5cbe69b34d6aa81f06dd",
+      "modified_sha256": "095a2801f24964fc808a2fe59ead47e230a1c0b3c4a9e16ada6e2878a1f388ab"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.cpp",
+      "baseline_sha256": "36ece6983aaef2e1a4a66f9adda69c43fdb91b015f71381d3a92999964303831",
+      "modified_sha256": "12b04e6c104bce620b0136ce7f013f90b5b6d6b6bb82bcaa34580dde53665d46"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.h",
+      "baseline_sha256": "c18047bf3f256ee7fd82d39cc0dd1fdb8dcc6ed284fc7aae2ab06c1711ac5499",
+      "modified_sha256": "7ecb9f9ae9bb9fbd59c541d6a5e3c57aecf80eafd09edcf12a881b77d2c728d8"
+    },
+    {
+      "path": "tests/test_depth_of_field.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "ac9f04d03a7bf19985c3f67bc244829bedec7492c9e339c5d101986f01426ec5"
+    },
+    {
+      "path": "tests/test_settings.cpp",
+      "baseline_sha256": "74fc5b939d6dba7dc3eded5c7e53ed2aa20a6ec5d3d4a9261f55fd75d972df92",
+      "modified_sha256": "3f6563b8b0077274fcf3971607f0968283f0448396fa8f437232ce6beb60e654"
+    }
+  ]
+}

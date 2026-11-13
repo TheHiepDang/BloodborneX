@@ -86,6 +86,13 @@ credited in the code.
 
 ## Build
 
+Tier 2 T2-01 adds optional Modern DoF after the complete Tier 1/live chain:
+`python tools/apply-tier2-modern-dof.py <engine-source> --check`, then omit
+`--check` to apply. `tier2-modern-dof.patch` and its baseline/output hash manifest
+are the maintained source change. Original remains default, mode needs restart,
+and modern intensity is live. See
+[01-modern-dof.md](../docs/tier2-graphics/01-modern-dof.md).
+
 The first live-toggle batch follows all four Tier 1 supplements. Apply
 `python tools/apply-tier1-live-toggles.py <engine-source>` after
 `tier1-final-renderer.patch`. The five compute-effect switches latch between
@@ -139,3 +146,35 @@ no longer includes. The result is `out/bb-probe.exe`; the package's `out/` holds
 CLANG64 DLLs it loads.
 
 GPL-3.0-or-later, like the engine.
+# Tier 2 acceptance batch (12 November 2026)
+
+After the existing Tier 1 and `tier2-modern-dof` supplements, apply
+`python tools/apply-tier2-batch.py <complete-engine-source>`. Its manifest verifies
+the entire preimage before changing files; `--check` replays the patch without
+modifying the source. Already-applied source archives must not be patched again.
+
+This supplement contains T2-02 visual polish, T2-03 live GGX/local-light shader
+variants, and T2-04 live native exposure/SSS/tonemap/bloom. New options default to
+OFF/Original. Probe GI and RT/VSM remain gated research results, not shipped effects.
+See `docs/tier2-graphics/BATCH-TEST.md` and the per-milestone reports.
+
+Build normally with the applied engine's `build.sh`. For the existing native
+Windows build workaround, regenerate cache IDs after linking with
+`python tools/write-engine-cache-ids.py <complete-engine-source>`: this batch
+changes the shader compiler and must not reuse historical cache identity files.
+The renderer also uses a distinct Tier 2 postprocessing cache namespace.
+
+The rc7 Picture-controls follow-up is `tier2-controls.patch` with
+`tier2-controls-baseline.json`. Apply it **after** `tier2-batch` using
+`python tools/apply-tier2-controls.py <complete-engine-source>` (`--check` for
+validation only). It reorganizes effect dependencies and defaults, adds a live
+advanced-effects bypass, moves bloom production to the verified final-composite
+scene input, and supplies local-light coefficients through live push constants.
+It also includes the two-column launcher strength UI, standard native sliders, normalized 1–100 display
+mapping, and live exposure, motion-blur, sky-filter, PCSS-softness and shadow
+transition controls. The native INI ranges and preset compatibility are retained.
+Custom presets support confirmed, atomic replacement of existing owned entries;
+the provided RTX 3070 profiles stay immutable. See the same report for the current
+Picture layout and preset overwrite validation.
+See `docs/tier2-graphics/07-picture-controls.md`. The owner's requested delivery
+updates the existing rc7 portable folder; existing ZIP archives are retained.

@@ -501,7 +501,7 @@ namespace BloodborneLauncher
             _playItem = Tab(L.T("Play"), typeof(PlayPage));
             Tab(L.T("Display"), typeof(DisplayPage));
             Tab(L.T("Graphics"), typeof(GraphicsPage));
-            Tab(L.T("NR"), typeof(NeuralRenderingPage));
+            Tab(L.T("Neural Rendering"), typeof(NeuralRenderingPage));
             _controlsItem = Tab(L.T("Controls"), typeof(ControlsPage));
             Tab(L.T("Trophies"), typeof(TrophiesPage));
             _onlineItem = Tab(L.T("Online"), typeof(OnlinePage));

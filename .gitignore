@@ -40,3 +40,6 @@ launcher/windows/install.txt
 docs/*
 !docs/tier1-graphics/
 !docs/tier1-graphics/**
+
+!docs/tier2-graphics/
+!docs/tier2-graphics/**

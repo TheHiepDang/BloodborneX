@@ -11,6 +11,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Version>1.0.1</Version>
     <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- Portable single-file publishes must carry WPF's native DLLs too. Otherwise
+         copying only the launcher exe produces a DllNotFoundException at startup. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
   <ItemGroup>

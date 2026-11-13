@@ -146,7 +146,11 @@ try {
     Copy-One (Join-Path $repo 'README.md') (Join-Path $package 'README.md')
     Copy-One $notes (Join-Path $package 'RELEASE-NOTES.md')
     Copy-One $notes (Join-Path $release 'RELEASE-NOTES.md')
-    $supplemental = @('frame-generation-memory-fix.patch','nr-runtime-compatibility-fix.patch','nr-look-controls.patch') | ForEach-Object {
+    # Provenance includes the maintained Tier 1/Tier 2 supplements, in application order.
+    $supplemental = @('frame-generation-memory-fix.patch','nr-runtime-compatibility-fix.patch','nr-look-controls.patch',
+        'tier1-gtao.patch','tier1-lighting.patch','tier1-atmosphere-shadows.patch',
+        'tier1-final-renderer.patch','tier1-live-toggles.patch','tier2-modern-dof.patch','tier2-batch.patch','tier2-controls.patch') |
+        Where-Object { Test-Path -LiteralPath (Join-Path $repo "engine\$_") } | ForEach-Object {
         @{name=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $repo "engine\$_")).Hash}
     }
 
