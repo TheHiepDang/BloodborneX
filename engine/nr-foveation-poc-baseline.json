@@ -1,0 +1,69 @@
+{
+  "description": "M2-B native Vulkan fixed one-pass Legacy proof with validation, source-correct build, trial rejection and resource-extent recovery; gameplay/performance gate remains blocked.",
+  "bloodbornex_commit": "de39d563733cbccdda38181bbe97d8b2beb1ac20",
+  "upstream_repository": "maximedgoulet/FoveatedDLSS5",
+  "upstream_commit": "0d875756506ffb581a886892ecdbc9a66a6cefd5",
+  "prerequisite": "Current applied Tier 2 controls source; exact preimage hashes below, including newer local work.",
+  "files": [
+    {
+      "path": "gpu/CMakeLists.txt",
+      "baseline_sha256": "d77c347962d7a2bb4beff6ec1ac03c02c644829947a62a65e4d0451266d374a0",
+      "modified_sha256": "4c8de362a1f7305cacb426a28b550bf90692af029c9ed3224ac81f58c907aa64"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp",
+      "baseline_sha256": "6288e431ea9944f07af2790dfed82e2e6708a0cb24d36c6dacdc12b8d8d3f188",
+      "modified_sha256": "7a0d3371333916c4a960a8aa24616325b7c13264a354f7f88c51f956a684ee77"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/nr_foveation.h",
+      "baseline_sha256": null,
+      "modified_sha256": "c16092bb389cf1b56ff10a54571e6aa59d00480b49684b6fb3d37914a77b18a4"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/nr_foveation.glsl",
+      "baseline_sha256": null,
+      "modified_sha256": "2075f18fb2f50fecca4801b2c1b70139f42e937af0d51e364f4ca8ab03120235"
+    },
+    {
+      "path": "gpu/shadps4/video_core/host_shaders/dlss_nr_foveated.comp",
+      "baseline_sha256": null,
+      "modified_sha256": "db6d53c0e1d37dce128dc66ca5aeb791d7e448328ada39345ef30ac490a307f2"
+    },
+    {
+      "path": "tests/test_nr_foveation.cpp",
+      "baseline_sha256": null,
+      "modified_sha256": "f60f1a2093898725e2d2dad706b2effb841f052e8e530c9b3515ce6c00a5302c"
+    },
+    {
+      "path": "tests/test_hdr_native.cpp",
+      "baseline_sha256": "8b483c2ff6f410bf81f67c09ccc78e3aa6805b47999b1d1393f9c02f7a5fa446",
+      "modified_sha256": "72f40ac97db0dff0e07fe6af9b8f28975b3bc874202278c9a912e6720b1f9c68"
+    },
+    {
+      "path": "licenses/FoveatedDLSS5-MIT.txt",
+      "baseline_sha256": null,
+      "modified_sha256": "e9e2da3991a48d9c09b710c9ddbf5673275b6d569c976bcffab3111d0c509d51"
+    },
+    {
+      "path": "gpu/cmake/LinkClosure.cmake",
+      "baseline_sha256": "bbe01d1b93dbd25aca7d56e8f6bc1ca8d819735727a389e1a5802528ac18fb8c",
+      "modified_sha256": "e3944c292821742e6e59e94eeb965d65c15cfe9b666a9e894b094c44b4134f7d"
+    },
+    {
+      "path": "gpu/dlssnr_forwarder.cpp",
+      "baseline_sha256": "cec3a35f3e2b40acff29c41670df9157c74f9f0d224a49297bb486f25117b377",
+      "modified_sha256": "543bb699fb113401c2d7f01ff85bb5fe35ddfcfbb53ffb74fcb12efdb3b20a10"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/nr_foveation_trial.h",
+      "baseline_sha256": null,
+      "modified_sha256": "cfffb48c436896bbbc13b28c752c02099a3d7a5f8b643ac95d79982d2a4e031a"
+    },
+    {
+      "path": "tests/test_link_closure.py",
+      "baseline_sha256": null,
+      "modified_sha256": "dbafdfc558f97aa45b14798d35a484239ffdc725268f9438475c2ff20e9e7b6a"
+    }
+  ]
+}

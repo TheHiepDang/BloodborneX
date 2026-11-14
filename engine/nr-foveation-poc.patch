@@ -1,0 +1,1480 @@
+diff --git a/gpu/CMakeLists.txt b/gpu/CMakeLists.txt
+--- a/gpu/CMakeLists.txt
++++ b/gpu/CMakeLists.txt
+@@ -152,6 +152,8 @@
+     set(EXTRA_SHADER_DEPS "")
+     if(FILENAME MATCHES "^native_motion_blur")
+         set(EXTRA_SHADER_DEPS ${SHADER_SRC}/native_motion_blur.glsl)
++    elseif(FILENAME STREQUAL "dlss_nr_foveated.comp")
++        set(EXTRA_SHADER_DEPS ${SHADER_SRC}/nr_foveation.glsl)
+     endif()
+     set(OUT ${SHADER_DIR}/${SHADER_NAME}.h)
+     string(TOUPPER ${SHADER_NAME} SYMBOL)
+@@ -241,6 +243,7 @@
+ add_host_shader(ssgi.comp ssgi_composite_comp COMPOSITE=1)
+ add_host_shader(dlss_nr.comp dlss_nr_comp)
+ add_host_shader(dlss_nr_scaled.comp dlss_nr_scaled_comp)
++add_host_shader(dlss_nr_foveated.comp dlss_nr_foveated_comp)
+ add_host_shader(dlss_nr_look.comp dlss_nr_look_comp)
+ add_host_shader(buffer_multi_copy.comp buffer_multi_copy_comp)
+ add_host_shader(depth_resample.frag depth_resample_frag)
+@@ -589,3 +592,6 @@
+ target_compile_options(live-local-light-test PRIVATE -UNDEBUG -Wall -Wextra -Werror -Wno-missing-field-initializers)
+ target_link_libraries(live-local-light-test PRIVATE Vulkan::Vulkan)
+ add_dependencies(live-local-light-test host_shaders)
++
++add_executable(nr-foveation-test EXCLUDE_FROM_ALL ../tests/test_nr_foveation.cpp)
++target_compile_options(nr-foveation-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp
+@@ -1,6 +1,9 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ #include "video_core/renderer_vulkan/vk_dlss.h"
+ #include "video_core/renderer_vulkan/nr_runtime_identity.h"
++#include "video_core/renderer_vulkan/nr_foveation.h"
++#include "video_core/renderer_vulkan/nr_foveation_trial.h"
++#include "video_core/host_shaders/dlss_nr_foveated_comp.h"
+ 
+ #include <array>
+ #include <chrono>
+@@ -12,6 +15,7 @@
+ #include <fstream>
+ #include <mutex>
+ #include <string>
++#include <string_view>
+ #include <tuple>
+ #include <utility>
+ #include <vector>
+@@ -116,6 +120,7 @@
+         std::array<BbSettings::DlssNrTuning, 2> extra{};
+         u32 scene_width{}, scene_height{};
+         float extra_style{};
++        bool foveated{};
+         bool operator==(const Key&) const = default;
+     } key{};
+     VideoCore::UniqueImage proxy, original, model, resolved;
+@@ -136,6 +141,11 @@
+     vk::UniqueDescriptorSetLayout scaled_descriptor_layout;
+     vk::UniquePipelineLayout scaled_pipeline_layout;
+     vk::UniquePipeline scaled_pipeline;
++    vk::UniquePipelineLayout foveated_pipeline_layout;
++    vk::UniquePipeline foveated_pipeline;
++    NrFoveation::Grid foveation;
++    NrFoveation::TrialState trial{std::getenv("BB_DLSS_NR_FOVEATION_FAULT")};
++    NrFoveation::ResourceShape resource_shape;
+     bool Scaled() const { return key.width != key.scene_width || key.height != key.scene_height; }
+     VideoCore::UniqueImage look_edits;
+     vk::UniqueImageView look_edits_view;
+@@ -155,7 +165,11 @@
+     vk::UniqueQueryPool timing_pool;
+     std::array<u64, 4> timing_ticks{};
+     u64 timing_frame = 0, timestamp_mask = ~u64(0);
+-    const u32 timing_stride = std::getenv("BB_DLSS_NR_PROFILE") ? 5 : 2;
++    const u32 timing_stride = (std::getenv("BB_DLSS_NR_PROFILE") || std::getenv("BB_DLSS_NR_PROFILE_CSV")) ? 5 : 2;
++    struct TimingInfo { u32 sw{},sh{},w{},h{}; bool foveated{}; u64 tick{}; };
++    std::array<TimingInfo,4> timing_info{};
++    std::ofstream timing_csv;
++    bool timing_csv_attempted=false;
+     u64 timing_samples = 0;
+     float timestamp_period = 0.0f;
+     u32 diagnostic_frames = 0;
+@@ -369,18 +383,36 @@
+                     std::array<float, 4> ms{};
+                     for (u32 i = 0; i < ms.size(); ++i)
+                         ms[i] = float(double((values[i + 1] - values[i]) & timestamp_mask) * timestamp_period / 1.0e6);
++                    if (!timing_csv_attempted) {
++                        timing_csv_attempted=true;
++                        if (const char* path=std::getenv("BB_DLSS_NR_PROFILE_CSV");path && *path) {
++                            timing_csv.open(std::filesystem::path(path),std::ios::out);
++                            if(timing_csv) timing_csv << "sample_utc_ms,tick,foveated,scene_w,scene_h,model_w,model_h,encode_guides_ms,inference_ms,resolve_ms,copy_ms,nr_total_ms\n";
++                            else std::printf("DLSS NR: unable to open requested trial timing CSV\n");
++                        }
++                    }
++                    const auto& info=timing_info[slot];
++                    if(timing_csv) {
++                        const auto sample_utc_ms=std::chrono::duration_cast<std::chrono::milliseconds>(
++                            std::chrono::system_clock::now().time_since_epoch()).count();
++                        timing_csv << sample_utc_ms << ',' << info.tick << ',' << int(info.foveated) << ',' << info.sw << ',' << info.sh << ','
++                            << info.w << ',' << info.h << ',' << ms[0] << ',' << ms[1] << ',' << ms[2] << ',' << ms[3] << ','
++                            << float(ticks*timestamp_period/1.0e6) << '\n';
++                        if(timing_samples%120==0) timing_csv.flush();
++                    }
+                     auto& s = BbSettings::Get();
+                     s.dlss_nr_encode_ms = ms[0]; s.dlss_nr_evaluate_ms = ms[1];
+                     s.dlss_nr_resolve_ms = ms[2]; s.dlss_nr_copy_ms = ms[3];
+                     if (timing_samples++ % 120 == 0)
+                         std::printf("DLSS NR GPU: scene %ux%u model %ux%u; encode/guides %.3f ms, evaluate %.3f ms, resolve %.3f ms, copy %.3f ms\n",
+-                            key.scene_width, key.scene_height, key.width, key.height, ms[0], ms[1], ms[2], ms[3]);
++                            info.sw, info.sh, info.w, info.h, ms[0], ms[1], ms[2], ms[3]);
+                 }
+             }
+         }
+         cmd.resetQueryPool(*timing_pool, slot * timing_stride, timing_stride);
+         cmd.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, *timing_pool, slot * timing_stride);
+         timing_ticks[slot] = scheduler.CurrentTick();
++        timing_info[slot]={key.scene_width,key.scene_height,key.width,key.height,key.foveated,scheduler.CurrentTick()};
+         return int(slot);
+     }
+     void MarkTiming(vk::CommandBuffer cmd, int slot, u32 boundary) {
+@@ -395,6 +427,7 @@
+         for (auto& feature : features) if (feature) { release(feature); feature = nullptr; }
+     }
+     void MakeResources(u32 width, u32 height, int passes, u32 scene_width, u32 scene_height) {
++        resource_shape = {};
+         const auto device = instance.GetDevice(); const auto allocator = instance.GetAllocator();
+         const auto make = [&](VideoCore::UniqueImage& image, vk::UniqueImageView& view,
+                               u32 w, u32 h, vk::Format format = vk::Format::eR16G16B16A16Sfloat) {
+@@ -434,6 +467,8 @@
+             if (n + 1 < passes) make(extra_models[n], extra_model_views[n], width, height);
+             else { extra_model_views[n].reset(); extra_models[n] = VideoCore::UniqueImage{}; }
+         }
++        // This describes actual images, even if the following NGX create fails.
++        resource_shape = {width,height,scene_width,scene_height,passes};
+     }
+     void MakeLookResources(u32 width, u32 height) {
+         const auto device = instance.GetDevice(); const auto allocator = instance.GetAllocator();
+@@ -475,6 +510,20 @@
+             std::chrono::steady_clock::now().time_since_epoch()).count();
+         wanted.extra_style = style_request.Select(requested, applied_extra_style, features[0] != nullptr, u64(now));
+         if (wanted.extra_style != 0) wanted.preset = 1; // Edited weights belong to Old/HT.
++        // M2 developer-only fixed proof: no UI, multipass or warped look history.
++        // Incompatible modes keep their existing uniform NR path.
++        const char* opt = std::getenv("BB_DLSS_NR_FOVEATION_POC");
++        if (!trial.rejected && opt && std::string_view(opt) == "1" && wanted.passes == 1 &&
++            diagnostic_motion_scale == 1.0f &&
++            s.dlss_nr_composition == 0 && model_width >= 32 && model_height >= 32) {
++            const auto grid = NrFoveation::MakeGrid(true, {}, width, height);
++            const auto w = NrFoveation::WarpedExtent(model_width, grid.x);
++            const auto h = NrFoveation::WarpedExtent(model_height, grid.y);
++            // Check actual rounded tensor area, not merely a forecast.
++            if (grid.active() && double(w)*h <= double(model_width)*model_height*0.95) {
++                wanted.width=w; wanted.height=h; wanted.foveated=true;
++            }
++        }
+         wanted.scene_width = width; wanted.scene_height = height;
+         for (int pass = 1; pass < wanted.passes; ++pass)
+             wanted.extra[pass - 1] = BbSettings::DlssNrPassTuning(s, pass);
+@@ -485,6 +534,9 @@
+                          : k.extra[pass - 1];
+     }
+     bool Prepare(const Frame& f) {
++        // Even a failed experimental create/evaluate may have recorded work.
++        // Retire that tick before rebuilding the uniform NR fallback.
++        if (trial.Pending(scheduler.CurrentTick())) return false;
+         Key wanted = Wanted(f.width, f.height);
+         if (features[0] && wanted == key) {
+             if (log_composition && !look_edits_view) {
+@@ -498,8 +550,8 @@
+         // buffer, and Finish replaces it. If the old feature was used in this tick,
+         // bypass until a submission boundary; otherwise drain the submitted work.
+         if (features[0] && feature_tick >= scheduler.CurrentTick()) return false;
+-        const bool same_resources = proxy_view && key.width == wanted.width && key.height == wanted.height &&
+-            key.scene_width == f.width && key.scene_height == f.height && key.passes == wanted.passes;
++        const bool same_resources = proxy_view && resource_shape == NrFoveation::ResourceShape{
++            wanted.width,wanted.height,f.width,f.height,wanted.passes};
+         ReleaseFeature(); scheduler.WaitSubmittedWork();
+         if (!same_resources) MakeResources(wanted.width, wanted.height, wanted.passes, f.width, f.height);
+         { std::scoped_lock lock{nr_mutex};
+@@ -523,11 +575,18 @@
+           }
+           for (int pass = 0; pass < wanted.passes; ++pass) {
+               const auto tuning = Tuning(wanted, pass);
+-              features[pass] = create((void*)VkCommandBuffer(f.cmdbuf), params, wanted.width, wanted.height,
++              const bool inject=trial.Inject(NrFoveation::TrialState::Fault::Create,wanted.foveated);
++              if(inject) std::printf("DLSS NR trial: injecting one experimental create rejection\n");
++              features[pass] = inject ? nullptr : create((void*)VkCommandBuffer(f.cmdbuf), params, wanted.width, wanted.height,
+                                      wanted.preset, tuning.intensity, tuning.style, tuning.structure,
+                                      tuning.tone, tuning.skin, wanted.auto_mask, 0);
+               feature_tick = scheduler.CurrentTick();
+               if (!features[pass]) {
++                  if (wanted.foveated) {
++                      trial.Reject(scheduler.CurrentTick()); history_reset = true; sr_reset_pending = true;
++                      std::printf("DLSS NR: foveation create rejected; retrying standard NR after submission boundary\n");
++                      return false;
++                  }
+                   Fail("feature 18 creation failed; ordinary DLSS remains enabled"); return false;
+               }
+               std::printf("DLSS NR: pass %d feature handle %p; style=%d intensity=%g structure=%g tone=%g skin=%g\n",
+@@ -536,6 +595,7 @@
+         }
+         if (log_composition && !look_edits_view) MakeLookResources(wanted.width, wanted.height);
+         look_valid = false;
++        foveation = NrFoveation::MakeGrid(wanted.foveated, {}, f.width, f.height);
+         key = wanted; skip_first = true; history_reset = true; sr_reset_pending = true;
+         diagnostic_captured = false; diagnostic_frames = 0;
+         feature_tick = scheduler.CurrentTick();
+@@ -545,7 +605,7 @@
+         BbSettings::Get().dlss_nr_model_height = key.height;
+         std::printf("DLSS NR: %d feature 18 pass(es); scene/SR %ux%u, model %ux%u (%s, preset %d, style %d); evaluation begins next frame\n",
+                     key.passes, f.width, f.height, key.width, key.height,
+-                    Scaled() ? "optimized" : "standard", key.preset, key.style);
++                    key.foveated ? "foveation POC" : Scaled() ? "optimized" : "standard", key.preset, key.style);
+         return true;
+     }
+     void Dispatch(vk::CommandBuffer cmd, u32 mode, vk::ImageView source, vk::ImageView model_in,
+@@ -573,6 +633,18 @@
+         cmd.dispatch((width + 7) / 8, (height + 7) / 8, 1);
+     }
+     void DispatchScaled(const Frame& f, bool resolve) {
++        if (key.foveated && !foveated_pipeline) {
++            const auto device=instance.GetDevice();
++            const vk::PushConstantRange range{vk::ShaderStageFlagBits::eCompute,0,68};
++            foveated_pipeline_layout=Check(device.createPipelineLayoutUnique({
++                .setLayoutCount=1,.pSetLayouts=&*scaled_descriptor_layout,
++                .pushConstantRangeCount=1,.pPushConstantRanges=&range}));
++            const auto module=CompileSPV(DLSS_NR_FOVEATED_COMP,device);
++            foveated_pipeline=Check(device.createComputePipelineUnique({}, {
++                .stage={.stage=vk::ShaderStageFlagBits::eCompute,.module=module,.pName="main"},
++                .layout=*foveated_pipeline_layout}));
++            device.destroyShaderModule(module);
++        }
+         const std::array views{f.color.view, f.depth.view,
+             resolve ? *reduced_depth_view : f.motion.view, *proxy_view,
+             resolve ? ResolveView() : ModelView(key.passes - 1), *proxy_view, *reduced_depth_view,
+@@ -589,9 +661,17 @@
+         struct Push { u32 mode, width, height, hdr; float white, strength; u32 scene_width, scene_height, composition; };
+         const Push push{resolve ? 1u : 0u, key.width, key.height, f.hdr,
+             BbSettings::Get().dlss_nr_white_point, 1.0f, f.width, f.height, u32(log_composition)};
+-        f.cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *scaled_pipeline);
+-        f.cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *scaled_pipeline_layout, 0, writes);
+-        f.cmdbuf.pushConstants(*scaled_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(push), &push);
++        const auto layout=key.foveated ? *foveated_pipeline_layout : *scaled_pipeline_layout;
++        f.cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, key.foveated ? *foveated_pipeline : *scaled_pipeline);
++        f.cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, layout, 0, writes);
++        if (key.foveated) {
++            struct FoveatedPush { Push base; u32 x,y; float cx,cy; u32 bx,by; float fx,fy; };
++            static_assert(sizeof(FoveatedPush)==68);
++            const FoveatedPush fp{push,foveation.x.packed,foveation.y.packed,
++                foveation.x.center,foveation.y.center,foveation.x.bounds,foveation.y.bounds,
++                foveation.x.blend,foveation.y.blend};
++            f.cmdbuf.pushConstants(layout,vk::ShaderStageFlagBits::eCompute,0,sizeof(fp),&fp);
++        } else f.cmdbuf.pushConstants(layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(push), &push);
+         const u32 w = resolve ? f.width : key.width, h = resolve ? f.height : key.height;
+         f.cmdbuf.dispatch((w + 7) / 8, (h + 7) / 8, 1);
+     }
+@@ -824,7 +904,9 @@
+                                   vk::Format::eR16G16B16A16Sfloat};
+         auto color = Resource(pass_input, vk::ImageAspectFlagBits::eColor, false);
+         auto output = Resource(model_r, vk::ImageAspectFlagBits::eColor, true);
+-        const int result = [&] { std::scoped_lock lock{nr_mutex};
++        const bool inject=trial.Inject(NrFoveation::TrialState::Fault::Evaluate,key.foveated);
++        if(inject) std::printf("DLSS NR trial: injecting one experimental evaluate rejection\n");
++        const int result = inject ? -1 : [&] { std::scoped_lock lock{nr_mutex};
+             // NR uses the same previous-minus-current pixel convention as DLSS SR.
+             // Developer controls may override this for convention experiments.
+             const float mv_scale = diagnostic_motion_scale;
+@@ -833,7 +915,15 @@
+                             0, diagnostic_reset < 0 ? f.reset || history_reset : diagnostic_reset,
+                             tuning.intensity, tuning.style, tuning.structure,
+                             tuning.tone, tuning.skin, key.auto_mask, mv_scale, mv_scale); }();
+-        if (result != 1) { Fail("feature 18 evaluation failed; pass bypassed"); return false; }
++        if (result != 1) {
++            if (key.foveated) {
++                trial.Reject(scheduler.CurrentTick()); history_reset = true; sr_reset_pending = true;
++                feature_tick = scheduler.CurrentTick();
++                std::printf("DLSS NR: foveation evaluate rejected; retrying standard NR after submission boundary\n");
++                return false;
++            }
++            Fail("feature 18 evaluation failed; pass bypassed"); return false;
++        }
+         feature_tick = scheduler.CurrentTick();
+         const vk::MemoryBarrier2 evaluated{
+             .srcStageMask = all, .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/nr_foveation.h b/gpu/shadps4/video_core/renderer_vulkan/nr_foveation.h
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/renderer_vulkan/nr_foveation.h
+@@ -0,0 +1,370 @@
++// SPDX-License-Identifier: MIT
++// Adapted from maximedgoulet/FoveatedDLSS5 @ 0d875756506ffb581a886892ecdbc9a66a6cefd5.
++// See licenses/FoveatedDLSS5-MIT.txt. No auto-trim integration.
++// Foveated NR working grid - host side.  Mirrors shaders/foveation.hlsli:
++// the packed per-axis dword, the density integral G and the working-size
++// factor.  Change the two together.
++//
++// The NR model is same-resolution, so "foveated" means a separable warp of
++// the working image: per axis, density 1 inside the centre zone, a smoothstep
++// fall-off over `falloff` pixels, and `edge` beyond it.  The player gives
++// shares of the screen (Params); SizeAxis turns them into OUTPUT pixels for
++// the running output, so one setting works at any resolution: an axis whose
++// centre covers the whole screen is simply not warped.  Corners get
++// edge x edge.
++//
++// Dual foveation (Params::contour_w/h): beyond a midpoint zone NR is
++// off entirely - the working image covers only the zone, and the resolve
++// keeps the game's pixels outside it.  Distances then run from c to the
++// zone's bounds [m0, m1] instead of the screen edges (foveation.hlsli).
++//
++// The centre zone can sit anywhere on each axis (Params::center_x/y, e.g.
++// lower for a racing game's dashboard).  Distances are measured from that
++// centre c, so the two sides of an axis have different lengths (2c and
++// 2 - 2c in half-screen units); the working position is
++//   v(n) = (G(2c) + sign(n - c) * G(2|n - c|)) / (G(2c) + G(2 - 2c)),
++// which is the symmetric warp exactly when c = 0.5.  c is clamped so the
++// centre zone never leaves the screen and snapped to whole output pixels.
++//
++// One NR evaluate, one temporal history, no tile seams.
++#pragma once
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <initializer_list>
++
++namespace NrFoveation {
++
++inline constexpr uint32_t kEnabledBit = 0x80000000u;
++
++// Field layout of one axis dword (foveation.hlsli FovDecode):
++//   bits  0..11  a = centre half-extent / half-extent of the screen, code/4095
++//   bits 12..23  b = fall-off length / half-extent, code/2048 (0..2)
++//   bits 24..30  e = edge density, code/128 (32..127 -> 0.25..0.99)
++//   bit  31      axis enabled
++inline constexpr uint32_t kCenterMax = 4095u;
++inline constexpr double kCenterScale = 4095.0;
++inline constexpr uint32_t kRampMax = 4095u;
++inline constexpr double kRampScale = 2048.0;
++inline constexpr uint32_t kEdgeMin = 32u;
++inline constexpr uint32_t kEdgeMax = 127u;
++inline constexpr double kEdgeScale = 128.0;
++
++inline constexpr float kMinEdge = 0.25f;
++inline constexpr float kMaxEdge = 1.f;
++
++// Below this saving the guide resample and the warped mappings cost more
++// than the NR pixels they remove: the grid stands down to uniform.
++inline constexpr double kMinSaving = 0.05;
++
++// Player settings, as shares of the screen so one setting fits any display
++// and no combination can contradict itself.  Per axis the screen splits into
++// centre + contour + off = 100 %: the contour is a THICKNESS added around the
++// centre (both sides together), so the midpoint zone (centre + contour) can
++// never be smaller than the centre, and what is left is the NR-off edge.
++struct Params {
++  float center_w = 0.5f;    // centre zone, share of the screen width
++  float center_h = 0.5f;    // ... and height
++  float contour_w = 0.25f;  // contour thickness, both sides together
++  float contour_h = 0.25f;
++  // Fall-off: how much of the contour's per-side thickness the resolution
++  // takes to step from the centre value to the midpoint value (0 = a hard
++  // step at the centre zone's border).  Blend: how much of it NR takes to
++  // fade out into the off zone.
++  float falloff = 0.5f;
++  float blend = 0.25f;
++  float edge = 0.5f;  // midpoint resolution per axis, relative to the centre
++  // Where the centre zone sits, 0..1 across the screen (0 = left / top,
++  // 0.5 = middle, 1 = right / bottom).  Clamped per frame so the zones stay
++  // on screen.
++  float center_x = 0.5f;
++  float center_y = 0.5f;
++
++};
++
++// The centre zone is never smaller than this share of an axis.
++inline constexpr float kMinCenterShare = 0.1f;
++
++// A share from a setting: non-finite means the fallback, then clamped.
++inline float SafeShare(float value, float lo, float hi, float fallback) {
++  return std::clamp(std::isfinite(value) ? value : fallback, lo, hi);
++}
++
++// One axis of Params in output pixels, the units MakeAxis works in.
++struct AxisSizes {
++  uint32_t center = 0;
++  uint32_t mid = 0xFFFFFFFFu;  // whole axis: nothing off
++  uint32_t falloff = 0;
++  uint32_t blend = 0;
++  float center_share = 1.f;   // effective shares (after the clamps)
++  float contour_share = 0.f;
++  float off_share = 0.f;
++};
++
++inline AxisSizes SizeAxis(uint32_t full, float center, float contour, float falloff,
++                          float blend) {
++  AxisSizes s;
++  const float c = SafeShare(center, kMinCenterShare, 1.f, 0.5f);
++  const float k = SafeShare(contour, 0.f, 1.f - c, 0.25f);
++  s.center_share = c;
++  s.contour_share = k;
++  s.off_share = std::max(0.f, 1.f - c - k);
++  const double f = static_cast<double>(full);
++  s.center = static_cast<uint32_t>(std::lround(c * f));
++  const uint32_t contour_px = static_cast<uint32_t>(std::lround(k * f));
++  // Under one pixel of off zone per side is no off zone.
++  if (s.center + contour_px + 2u <= full) s.mid = s.center + contour_px;
++  else s.off_share = 0.f;
++  const double side = 0.5 * contour_px;
++  s.falloff = static_cast<uint32_t>(std::lround(SafeShare(falloff, 0.f, 1.f, 0.5f) * side));
++  // A thin contour still gets a usable fade (2 % of the axis).
++  s.blend = static_cast<uint32_t>(
++      std::lround(SafeShare(blend, 0.f, 1.f, 0.25f) * std::max(side, 0.02 * f)));
++  return s;
++}
++
++// A trimmed axis never shrinks below this share of the screen: a limit pair
++// closer than that is ignored (whole screen).
++inline constexpr double kMinZoneExtent = 0.1;
++inline constexpr double kBoundsScale = 65535.0;
++
++// The exact values the shaders decode from one axis dword.
++struct Decoded {
++  double a = 1.0;
++  double b = 0.0;
++  double e = 1.0;
++  double k = 0.0;
++};
++
++// Integral of the density over [0, tau], tau = 2|n - c| (distance from the
++// zone's centre in half-screen units).  The fall-off may run past the zone's
++// edge: then the midpoint value is never reached and the ramp is truncated,
++// keeping its physical length at every resolution.
++inline double G(double tau, const Decoded& p) {
++  if (tau <= p.a) return tau;
++  const double ramp_end = p.a + p.b;
++  const double ramp_area = p.b * (1.0 - 0.5 * p.k);
++  if (tau >= ramp_end) return p.a + ramp_area + p.e * (tau - ramp_end);
++  const double q = (tau - p.a) / p.b;
++  const double q2 = q * q;
++  return p.a + p.b * (q - p.k * (q2 * q - 0.5 * q2 * q2));
++}
++
++inline Decoded Decode(uint32_t packed) {
++  Decoded p;
++  if ((packed & kEnabledBit) == 0u) return p;
++  p.a = static_cast<double>(packed & 0xFFFu) / kCenterScale;
++  p.b = static_cast<double>((packed >> 12) & 0xFFFu) / kRampScale;
++  p.e = static_cast<double>((packed >> 24) & 0x7Fu) / kEdgeScale;
++  p.k = 1.0 - p.e;
++  return p;
++}
++
++// [m0, m1] from the packed bounds the shaders get (0 = the whole axis).
++inline void DecodeBounds(uint32_t bounds, double* m0, double* m1) {
++  if (bounds == 0u) {
++    *m0 = 0.0;
++    *m1 = 1.0;
++    return;
++  }
++  *m0 = static_cast<double>(bounds & 0xFFFFu) / kBoundsScale;
++  *m1 = static_cast<double>(bounds >> 16) / kBoundsScale;
++}
++
++// G(2(c - m0)) + G(2(m1 - c)): the density integral over the working part of
++// the axis, in half-screen units.  Half of it is the mean density.
++inline double GTotal(double c, double m0, double m1, const Decoded& p) {
++  return G(2.0 * (c - m0), p) + G(2.0 * (m1 - c), p);
++}
++
++// One axis: the packed dword (0 = identity), the zone's centre c, the
++// midpoint bounds and the blend width (the values the shaders get beside the
++// dword), and the mean density gmax, which sizes the working image.
++struct Axis {
++  uint32_t packed = 0;
++  float center = 0.5f;
++  uint32_t bounds = 0;  // m0 | m1 << 16, /65535; 0 = whole axis (nothing off)
++  float blend = 0.f;    // NR-off fade width, normalized
++  float gmax = 1.f;
++  // Effective values at this output, for the overlay and the log.
++  uint32_t center_px = 0;    // clamped centre extent
++  uint32_t position_px = 0;  // where the zone's middle actually sits
++  uint32_t mid_lo_px = 0;    // midpoint zone [lo, hi) in output pixels
++  uint32_t mid_hi_px = 0;
++  uint32_t falloff_px = 0;   // fall-off inside the zone, on the longer side
++  float edge_reached = 1.f;  // density at the farther end of the zone
++};
++
++inline Axis MakeAxis(uint32_t full, uint32_t center, uint32_t falloff, float edge,
++                     float position = 0.5f, uint32_t mid = 0xFFFFFFFFu,
++                     uint32_t blend = 0u) {
++  Axis axis;
++  axis.position_px = full / 2u;
++  axis.mid_hi_px = full;
++  constexpr double l0 = 0.0, l1 = 1.0;
++  const uint32_t avail_px = static_cast<uint32_t>(std::floor((l1 - l0) * full));
++  axis.center_px = std::min({center, full, avail_px});
++  // The midpoint zone is at least the centre zone and kMinZoneExtent of the
++  // screen (an empty zone would be an empty working axis, and its bounds
++  // would encode as 0 = the whole axis), and at most what is left.
++  const uint32_t min_mid_px = std::min(
++      static_cast<uint32_t>(std::ceil(kMinZoneExtent * full)), avail_px);
++  const uint32_t mid_px = std::clamp(
++      std::min(mid, full), std::max(axis.center_px, min_mid_px), avail_px);
++  bool cropped = mid_px < full;
++  if (full < 16u || (!cropped && axis.center_px >= full)) return axis;
++  uint32_t e_code = static_cast<uint32_t>(
++      std::clamp<long>(std::lround(std::clamp(edge, kMinEdge, kMaxEdge) * kEdgeScale),
++                       static_cast<long>(kEdgeMin), static_cast<long>(kEdgeMax) + 1));
++  if (e_code > kEdgeMax) {
++    if (!cropped) return axis;  // midpoint 1.0 and nothing off: no warp
++    e_code = kEdgeMax;          // 0.99: the crop still needs the mapping
++  }
++  const double half = 0.5 * static_cast<double>(full);
++  const uint32_t a_code = static_cast<uint32_t>(std::clamp<long>(
++      std::lround(0.5 * axis.center_px / half * kCenterScale), 0, kCenterMax));
++  // Fall-off longer than the screen is pointless: cap at the full extent.
++  const double ramp_px = std::min<double>(falloff, full);
++  const uint32_t b_code = static_cast<uint32_t>(
++      std::clamp<long>(std::lround(ramp_px / half * kRampScale), 0, kRampMax));
++  axis.packed = kEnabledBit | a_code | (b_code << 12) | (e_code << 24);
++  const Decoded p = Decode(axis.packed);
++  // Safeguards on the position: non-finite means the middle; snap to whole
++  // output pixels (sub-pixel slider jitter must not rebuild the grid and
++  // reset NR's history); then keep the decoded centre zone [c - a/2, c + a/2]
++  // inside the limits, which also keeps both sides of the axis non-empty.
++  const double wanted =
++      std::isfinite(position) ? std::clamp<double>(position, 0.0, 1.0) : 0.5;
++  const double snapped = std::round(wanted * full) / full;
++  const double c_lo = l0 + 0.5 * p.a;
++  const double c_hi = l1 - 0.5 * p.a;
++  axis.center =
++      static_cast<float>(c_lo <= c_hi ? std::clamp(snapped, c_lo, c_hi) : 0.5 * (l0 + l1));
++  const double c = axis.center;  // exactly what the shaders get
++  axis.position_px = static_cast<uint32_t>(std::lround(c * full));
++  // Midpoint zone: centred on c, shifted (never shrunk) to stay inside the
++  // limits.  It contains the centre zone because it is at least as large and
++  // both are inside the same limits.  Codes round outward.
++  double m0 = 0.0;
++  double m1 = 1.0;
++  if (cropped) {
++    // At least the DECODED centre extent: a's 12-bit code can round a hair
++    // above a same-sized midpoint zone.
++    const double extent = std::max(static_cast<double>(mid_px) / full, p.a);
++    double lo = c - 0.5 * extent;
++    double hi = c + 0.5 * extent;
++    if (lo < l0) {
++      hi += l0 - lo;
++      lo = l0;
++    }
++    if (hi > l1) {
++      lo -= hi - l1;
++      hi = l1;
++    }
++    const uint32_t lo_code = static_cast<uint32_t>(
++        std::clamp(std::floor(std::max(lo, 0.0) * kBoundsScale), 0.0, kBoundsScale));
++    const uint32_t hi_code = static_cast<uint32_t>(
++        std::clamp(std::ceil(std::min(hi, 1.0) * kBoundsScale), 0.0, kBoundsScale));
++    if (lo_code == 0u && hi_code == 0xFFFFu) {
++      cropped = false;  // rounds to the whole axis
++    } else {
++      axis.bounds = lo_code | (hi_code << 16);
++      DecodeBounds(axis.bounds, &m0, &m1);
++    }
++  }
++  axis.mid_lo_px = static_cast<uint32_t>(std::lround(m0 * full));
++  axis.mid_hi_px = static_cast<uint32_t>(std::lround(m1 * full));
++  axis.blend = static_cast<float>(std::min<double>(blend, full) / full);
++  axis.gmax = static_cast<float>(0.5 * GTotal(c, m0, m1, p));
++  // Overlay numbers for the longer side (the one that reaches lowest).
++  const double side = 2.0 * std::max(c - m0, m1 - c);
++  const double on_screen = std::clamp(side - p.a, 0.0, p.b);
++  axis.falloff_px = static_cast<uint32_t>(std::lround(on_screen * half));
++  if (p.b <= 0.0 || side >= p.a + p.b) {
++    axis.edge_reached = static_cast<float>(p.e);
++  } else {
++    const double q = (side - p.a) / p.b;
++    axis.edge_reached = static_cast<float>(1.0 - p.k * q * q * (3.0 - 2.0 * q));
++  }
++  return axis;
++}
++
++struct Grid {
++  Axis x;
++  Axis y;
++  bool active() const { return x.packed != 0u || y.packed != 0u; }
++  // NR pixels over the uniform grid's.
++  double PixelFactor() const { return static_cast<double>(x.gmax) * y.gmax; }
++  // Centre and bounds are part of the mapping: a moved or resized zone is a
++  // new grid (new working size, reset NR history), never a stale warp.  The
++  // blend width only weights the resolve, so it is not compared.
++  bool operator==(const Grid& o) const {
++    return x.packed == o.x.packed && y.packed == o.y.packed
++        && x.center == o.x.center && y.center == o.y.center
++        && x.bounds == o.x.bounds && y.bounds == o.y.bounds;
++  }
++  bool operator!=(const Grid& o) const { return !(*this == o); }
++};
++
++enum class Inactive : uint8_t { kNone, kOff, kCentreCoversScreen, kSavingTooSmall };
++
++// The grid for an output of full_width x full_height.  `why` says why it is
++// uniform when it is.
++inline Grid MakeGrid(bool enabled, const Params& params, uint32_t full_width,
++                     uint32_t full_height, Inactive* why = nullptr) {
++  Grid grid;
++  Inactive reason = Inactive::kNone;
++  if (!enabled) {
++    reason = Inactive::kOff;
++  } else {
++    const AxisSizes sx = SizeAxis(full_width, params.center_w, params.contour_w,
++                                  params.falloff, params.blend);
++    const AxisSizes sy = SizeAxis(full_height, params.center_h, params.contour_h,
++                                  params.falloff, params.blend);
++    grid.x = MakeAxis(full_width, sx.center, sx.falloff, params.edge, params.center_x,
++                      sx.mid, sx.blend);
++    grid.y = MakeAxis(full_height, sy.center, sy.falloff, params.edge, params.center_y,
++                      sy.mid, sy.blend);
++    if (!grid.active()) {
++      reason = Inactive::kCentreCoversScreen;
++    } else if (grid.PixelFactor() > 1.0 - kMinSaving) {
++      reason = Inactive::kSavingTooSmall;
++    }
++    if (reason != Inactive::kNone) {
++      // Keep the effective numbers for the overlay, drop the warp.
++      for (Axis* axis : {&grid.x, &grid.y}) {
++        axis->packed = 0u;
++        axis->center = 0.5f;
++        axis->bounds = 0u;
++        axis->gmax = 1.f;
++      }
++    }
++  }
++  if (why != nullptr) *why = reason;
++  return grid;
++}
++
++// Working extent on one axis: the uniform extent times the mean density, so
++// the centre keeps the uniform density exactly.
++inline uint32_t WarpedExtent(uint32_t uniform, const Axis& axis) {
++  if (axis.packed == 0u) return uniform;
++  return std::max<uint32_t>(
++      16u, static_cast<uint32_t>(std::lround(static_cast<double>(uniform) * axis.gmax)));
++}
++
++// Normalized full position -> normalized working position on one axis
++// (tests and diagnostics; the shaders carry their own copy).
++inline double Warp(double n, const Axis& axis) {
++  if (axis.packed == 0u) return n;
++  const Decoded p = Decode(axis.packed);
++  double m0 = 0.0;
++  double m1 = 1.0;
++  DecodeBounds(axis.bounds, &m0, &m1);
++  const double c = axis.center;
++  const double t = n - c;
++  const double s = t < 0.0 ? -1.0 : (t > 0.0 ? 1.0 : 0.0);
++  return (G(2.0 * (c - m0), p) + s * G(2.0 * std::abs(t), p)) / GTotal(c, m0, m1, p);
++}
++
++}  // namespace NrFoveation
+diff --git a/gpu/shadps4/video_core/host_shaders/nr_foveation.glsl b/gpu/shadps4/video_core/host_shaders/nr_foveation.glsl
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/host_shaders/nr_foveation.glsl
+@@ -0,0 +1,193 @@
++// SPDX-License-Identifier: MIT
++// Adapted from FoveatedDLSS5, pinned in nr_foveation.h; see licenses/FoveatedDLSS5-MIT.txt.
++// Foveated NR working grid (separable warp), dual foveation.
++//
++// DLSSNR is a same-resolution network, so a spatially varying working
++// resolution is expressed as a warp: the frame is resampled into a smaller
++// working image whose density, per axis, is 1 (relative to the uniform
++// working scale) inside the centre zone, falls along a smoothstep ramp, and
++// settles at the midpoint density.  The axes are independent.  The model
++// runs once on the warped image with warped guides (fov_guides), and every
++// stage that maps between the working grid and the full grid goes through
++// FovWarp / FovUnwarp.
++//
++// Three zones per axis: centre (density 1), midpoint (density e, after the
++// fall-off) out to the midpoint zone's bounds [m0, m1], and beyond them
++// nothing: the working image covers only [m0, m1], and the resolve keeps the
++// game's pixels there (FovZoneWeight, feathered over the blend width).
++//
++// Coordinates are normalized: n in [0, 1] across the full image, v in [0, 1]
++// across the working image.  Both extend monotonically past their ranges so
++// off-screen and off-zone reprojection stays well defined.
++//
++// Per-axis packed dword (foveation.hpp mirrors it; 0 = identity axis):
++//   bits  0..11  a: centre extent / screen extent, code / 4095
++//   bits 12..23  b: fall-off length / screen half-extent, code / 2048
++//   bits 24..30  e: midpoint density, code / 128
++//   bit  31      enabled
++// Beside it, per axis: the centre c (float, 0..1; the host keeps the centre
++// zone inside the bounds), the bounds (uint: m0 | m1 << 16, each code/65535;
++// 0 = the whole axis), and the blend width (float, normalized; used only by
++// FovZoneWeight).  Distances are measured from c in half-screen units, so the
++// sides have lengths 2(c - m0) and 2(m1 - c), and
++//   v(n) = (G(2(c - m0)) + sign(n - c) G(2|n - c|)) / (G(2(c - m0)) + G(2(m1 - c))).
++// With m0 = 0, m1 = 1 this is the single-zone warp; at c = 0.5 the symmetric
++// one.  The normalizer is two closed-form G evaluations.
++//
++// Cost: identity axes return immediately; the plateau and midpoint segments
++// are closed form; only the fall-off band runs the 4-step Newton inverse.
++
++#ifndef DLSS5_FOVEATION_HLSLI
++#define DLSS5_FOVEATION_HLSLI
++
++struct FovAxis {
++  float a;     // centre extent (plateau width in half-screen units)
++  float b;     // ramp length
++  float e;     // midpoint density
++  float k;     // 1 - e
++  float c;     // zone centre, 0..1
++  float gl;    // G(2(c - m0)): density integral of the side before c
++  float gtot;  // gl + G(2(m1 - c)): the whole working axis
++};
++
++bool FovAxisOn(uint packed) {
++  return (packed & 0x80000000u) != 0u;
++}
++
++bool FovAny(uvec2 packed) {
++  return ((packed.x | packed.y) & 0x80000000u) != 0u;
++}
++
++// Midpoint-zone bounds [m0, m1] of one axis; 0 means the whole axis.
++vec2 FovBounds(uint bounds) {
++   if (bounds == 0u) return vec2(0.0, 1.0);
++  return vec2(float(bounds & 0xFFFFu), float(bounds >> 16)) * (1.0 / 65535.0);
++}
++
++// G(tau): integral of the density over [0, tau], tau = 2|n - c|.  The ramp
++// may run past the zone's edge (truncated there); G stays monotone.
++float FovG(float tau, FovAxis p) {
++   if (tau <= p.a) return tau;
++  const float ramp_end = p.a + p.b;
++  const float ramp_area = p.b * (1.0 - 0.5 * p.k);
++   if (tau >= ramp_end) return p.a + ramp_area + p.e * (tau - ramp_end);
++  const float q = (tau - p.a) / p.b;
++  const float q2 = q * q;
++  return p.a + p.b * (q - p.k * (q2 * q - 0.5 * q2 * q2));
++}
++
++FovAxis FovDecode(uint packed, float center, uint bounds) {
++  FovAxis p;
++  p.a = float(packed & 0xFFFu) * (1.0 / 4095.0);
++  p.b = float((packed >> 12) & 0xFFFu) * (1.0 / 2048.0);
++  p.e = float((packed >> 24) & 0x7Fu) * (1.0 / 128.0);
++  p.k = 1.0 - p.e;
++  p.c = center;
++  const vec2 m = FovBounds(bounds);
++  p.gl = FovG(2.0 * (center - m.x), p);
++  p.gtot = p.gl + FovG(2.0 * (m.y - center), p);
++  return p;
++}
++
++// Inverse of FovG.  The ramp segment h(q) = q - k(q^3 - q^4/2) has
++// h'(q) = 1 - k * smoothstep(q) >= e >= 0.25, so Newton from q = r reaches
++// fp32 precision in four steps (measured: <0.003 px at 7680 px, e 0.25).
++float FovGInv(float g, FovAxis p) {
++   if (g <= p.a) return g;
++  const float ramp_area = p.b * (1.0 - 0.5 * p.k);
++   if (g >= p.a + ramp_area) return p.a + p.b + (g - p.a - ramp_area) / p.e;
++  const float r = (g - p.a) / p.b;
++  float q = r;
++
++  for (int i = 0; i < 4; ++i) {
++    const float q2 = q * q;
++    const float h = q - p.k * (q2 * q - 0.5 * q2 * q2) - r;
++    const float dh = 1.0 - p.k * (3.0 * q2 - 2.0 * q2 * q);
++    q = clamp(q - h / dh, 0.0, 1.0);
++  }
++  return p.a + p.b * q;
++}
++
++// One axis: full normalized -> working normalized, and back.
++float FovWarp1(float n, uint packed, float center, uint bounds) {
++   if (!FovAxisOn(packed)) return n;
++  const FovAxis p = FovDecode(packed, center, bounds);
++  const float t = n - p.c;
++  return (p.gl + sign(t) * FovG(2.0 * abs(t), p)) / p.gtot;
++}
++
++float FovUnwarp1(float v, uint packed, float center, uint bounds) {
++   if (!FovAxisOn(packed)) return v;
++  const FovAxis p = FovDecode(packed, center, bounds);
++  const float g = v * p.gtot - p.gl;
++  return p.c + 0.5 * sign(g) * FovGInv(abs(g), p);
++}
++
++vec2 FovWarp(vec2 n, uvec2 packed, vec2 center, uvec2 bounds) {
++  return vec2(FovWarp1(n.x, packed.x, center.x, bounds.x),
++                FovWarp1(n.y, packed.y, center.y, bounds.y));
++}
++
++vec2 FovUnwarp(vec2 v, uvec2 packed, vec2 center, uvec2 bounds) {
++  return vec2(FovUnwarp1(v.x, packed.x, center.x, bounds.x),
++                FovUnwarp1(v.y, packed.y, center.y, bounds.y));
++}
++
++// Continuous texel position on a `dst` grid (working) of the full-grid pixel
++// centre `pixel` (src grid).  Uniform form: (pixel + 0.5) * dst / src - 0.5.
++// An axis whose grids match is left alone even if its dword is set (the host
++// drops an axis whose working extent reaches the output's).
++vec2 FovFullToWorkPos(uvec2 pixel, uvec2 src, uvec2 dst, uvec2 packed, vec2 center,
++                        uvec2 bounds) {
++  vec2 pos = (vec2(pixel) + 0.5) * vec2(dst) / vec2(src) - 0.5;
++   if (FovAxisOn(packed.x) && src.x != dst.x) {
++    pos.x = FovWarp1((float(pixel.x) + 0.5) / float(src.x), packed.x, center.x, bounds.x)
++        * float(dst.x) - 0.5;
++  }
++   if (FovAxisOn(packed.y) && src.y != dst.y) {
++    pos.y = FovWarp1((float(pixel.y) + 0.5) / float(src.y), packed.y, center.y, bounds.y)
++        * float(dst.y) - 0.5;
++  }
++  return pos;
++}
++
++// Full-grid rectangle [lo, hi) covered by working texel `pixel` (`work`
++// texels over `full`): the encode footprint, exact under the warp.
++void FovWorkFootprint(uvec2 pixel, uvec2 work, uvec2 full, uvec2 packed, vec2 center,
++                      uvec2 bounds, inout vec2 lo, inout vec2 hi) {
++   if (FovAxisOn(packed.x) && work.x != full.x) {
++    lo.x = FovUnwarp1(float(pixel.x) / float(work.x), packed.x, center.x, bounds.x)
++        * float(full.x);
++    hi.x = FovUnwarp1(float(pixel.x + 1u) / float(work.x), packed.x, center.x, bounds.x)
++        * float(full.x);
++  }
++   if (FovAxisOn(packed.y) && work.y != full.y) {
++    lo.y = FovUnwarp1(float(pixel.y) / float(work.y), packed.y, center.y, bounds.y)
++        * float(full.y);
++    hi.y = FovUnwarp1(float(pixel.y + 1u) / float(work.y), packed.y, center.y, bounds.y)
++        * float(full.y);
++  }
++  lo = max(lo, 0.0);
++  hi = min(hi, vec2(full));
++}
++
++// How much of NR's change a full-grid position keeps: 1 inside the midpoint
++// zone, 0 outside it (the game's own pixels), smoothstep over `blend` inside
++// each bound that lies on screen.  A bound at the screen edge has nothing
++// beyond it, so it never fades.  1 for identity axes.
++float FovZoneWeight1(float n, uint packed, uint bounds, float blend) {
++   if (!FovAxisOn(packed) || bounds == 0u) return 1.0;
++  const vec2 m = FovBounds(bounds);
++  const float f = max(blend, 1e-6);
++  float w = 1.0;
++   if (m.x > 0.0) w *= smoothstep(m.x, m.x + f, n);
++   if (m.y < 1.0) w *= 1.0 - smoothstep(m.y - f, m.y, n);
++  return w;
++}
++
++float FovZoneWeight(vec2 n, uvec2 packed, uvec2 bounds, vec2 blend) {
++  return FovZoneWeight1(n.x, packed.x, bounds.x, blend.x)
++      * FovZoneWeight1(n.y, packed.y, bounds.y, blend.y);
++}
++
++#endif  // DLSS5_FOVEATION_HLSLI
+diff --git a/gpu/shadps4/video_core/host_shaders/dlss_nr_foveated.comp b/gpu/shadps4/video_core/host_shaders/dlss_nr_foveated.comp
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/host_shaders/dlss_nr_foveated.comp
+@@ -0,0 +1,119 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++#version 460
++#extension GL_EXT_scalar_block_layout : require
++#extension GL_GOOGLE_include_directive : require
++#include "nr_foveation.glsl"
++
++// Reduced model input, full-scene ratio reconstruction. Uses the RC1 composition's
++// RenoDX-derived (MIT) 75% luminance / 25% chroma ratio and original scene alpha.
++layout(local_size_x = 8, local_size_y = 8) in;
++layout(binding = 0) uniform sampler2D scene_image;
++layout(binding = 1) uniform sampler2D scene_depth;
++layout(binding = 2) uniform sampler2D scene_motion;
++layout(binding = 3) uniform sampler2D proxy_image;
++layout(binding = 4) uniform sampler2D model_image;
++layout(binding = 5, rgba16f) uniform writeonly image2D proxy_out;
++layout(binding = 6, r32f) uniform writeonly image2D depth_out;
++layout(binding = 7, rg16f) uniform writeonly image2D motion_out;
++layout(binding = 8, rgba16f) uniform writeonly image2D resolved_out;
++layout(push_constant, scalar) uniform Push {
++    uint mode, width, height, hdr;
++    float white_point, strength;
++    uint scene_width, scene_height;
++    uint composition;
++    uvec2 warp; vec2 center; uvec2 bounds; vec2 blend;
++} p;
++
++vec3 linear_to_srgb(vec3 x) {
++    return mix(12.92 * x, 1.055 * pow(max(x, 0.0), vec3(1.0 / 2.4)) - 0.055,
++               greaterThan(x, vec3(0.0031308)));
++}
++vec3 decode(vec3 x) {
++    if (p.hdr == 0) return x;
++    x = mix(x / 12.92, pow(max((x + 0.055) / 1.055, 0.0), vec3(2.4)),
++            greaterThan(x, vec3(0.04045)));
++    x = clamp(x, 0.0, 0.9995);
++    return x / max(1.0 - x, 1e-4) * p.white_point;
++}
++vec3 ratio_at(ivec2 q) {
++    q = clamp(q, ivec2(0), ivec2(p.width, p.height) - 1);
++    if (p.composition != 0u) return clamp(texelFetch(model_image, q, 0).rgb, vec3(-16), vec3(16));
++    vec3 base = max(decode(texelFetch(proxy_image, q, 0).rgb), 0.0);
++    vec3 model = max(decode(texelFetch(model_image, q, 0).rgb), 0.0);
++    float a = dot(base, vec3(0.2126, 0.7152, 0.0722));
++    float b = dot(model, vec3(0.2126, 0.7152, 0.0722));
++    return mix(vec3(clamp((b + 1e-4) / (a + 1e-4), 0.0, 2.0)),
++               clamp((model + 1e-4) / (base + 1e-4), 0.0, 2.0), 0.25);
++}
++
++void main() {
++    ivec2 q = ivec2(gl_GlobalInvocationID.xy);
++    ivec2 scene_size = ivec2(p.scene_width, p.scene_height);
++    if (p.mode == 0) {
++        if (any(greaterThanEqual(q, ivec2(p.width, p.height)))) return;
++        // Exact box footprint in scene pixels. Select depth and motion from the
++        // SAME nearest visible surface; never average motion across silhouettes.
++        vec2 scale = vec2(scene_size) / vec2(p.width, p.height);
++        vec2 lo = vec2(q) * scale, hi = vec2(q + 1) * scale;
++        FovWorkFootprint(uvec2(q), uvec2(p.width,p.height), uvec2(scene_size),
++                         p.warp, p.center, p.bounds, lo, hi);
++        vec4 color = vec4(0);
++        float weight = 0.0, nearest = 1e30;
++        vec2 motion = vec2(0);
++        for (int y = int(floor(lo.y)); y < int(ceil(hi.y)); ++y)
++        for (int x = int(floor(lo.x)); x < int(ceil(hi.x)); ++x) {
++            ivec2 s = clamp(ivec2(x, y), ivec2(0), scene_size - 1);
++            vec2 overlap = max(min(vec2(x + 1, y + 1), hi) - max(vec2(x, y), lo), 0.0);
++            float w = overlap.x * overlap.y;
++            color += texelFetch(scene_image, s, 0) * w;
++            weight += w;
++            float d = texelFetch(scene_depth, s, 0).r;
++            if (w > 0.0 && d < nearest) {
++                nearest = d;
++                motion = texelFetch(scene_motion, s, 0).xy;
++            }
++        }
++        color /= max(weight, 1e-8);
++        vec3 encoded = color.rgb;
++        if (p.hdr != 0) {
++            vec3 x = max(color.rgb / max(p.white_point, 1e-4), 0.0);
++            encoded = linear_to_srgb(x / (1.0 + x));
++        }
++        imageStore(proxy_out, q, vec4(encoded, color.a));
++        imageStore(depth_out, q, vec4(nearest));
++        // Previous-minus-current pixels now expressed in MODEL pixel units.
++        vec2 now = (vec2(q) + 0.5) / vec2(p.width,p.height);
++        vec2 n = FovUnwarp(now, p.warp, p.center, p.bounds);
++        vec2 previous = FovWarp(n + motion / vec2(scene_size), p.warp, p.center, p.bounds);
++        vec2 warped_motion = (previous - now) * vec2(p.width,p.height);
++        // Invalid motion must reject temporal reuse, never masquerade as static.
++        if (any(isnan(warped_motion)) || any(isinf(warped_motion))) warped_motion = vec2(65504);
++        imageStore(motion_out, q, vec4(clamp(warped_motion,vec2(-65504),vec2(65504)), 0, 0));
++        return;
++    }
++    if (any(greaterThanEqual(q, scene_size))) return;
++    vec4 scene = texelFetch(scene_image, q, 0);
++    vec2 n = (vec2(q) + 0.5) / vec2(scene_size);
++    float zone = FovZoneWeight(n, p.warp, p.bounds, p.blend);
++    if (zone <= 0.0) { imageStore(resolved_out,q,scene); return; }
++    vec2 at = FovFullToWorkPos(uvec2(q), uvec2(scene_size), uvec2(p.width,p.height),
++                                 p.warp,p.center,p.bounds);
++    ivec2 lo = ivec2(floor(at));
++    vec2 f = fract(at);
++    vec3 ratio = vec3(0);
++    float weight = 0.0, z = texelFetch(scene_depth, q, 0).r;
++    for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
++        ivec2 s = clamp(lo + ivec2(x, y), ivec2(0), ivec2(p.width, p.height) - 1);
++        // Reuse binding 2 for the reduced R32F depth during reconstruction.
++        float d = texelFetch(scene_motion, s, 0).r;
++        float w = (x == 0 ? 1.0 - f.x : f.x) * (y == 0 ? 1.0 - f.y : f.y);
++        w /= 1.0 + abs(z - d) * 10000.0;
++        ratio += ratio_at(s) * w;
++        weight += w;
++    }
++    ratio /= max(weight, 1e-8);
++    vec3 result = mix(scene.rgb, max(scene.rgb, 0.0) * ratio, clamp(p.strength, 0.0, 1.0));
++    if (p.composition != 0u)
++        result = clamp(scene.rgb * exp2(ratio), vec3(-65504), vec3(65504));
++    imageStore(resolved_out, q, vec4(mix(scene.rgb,result,zone), scene.a));
++}
+diff --git a/tests/test_nr_foveation.cpp b/tests/test_nr_foveation.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/test_nr_foveation.cpp
+@@ -0,0 +1,72 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#include "../gpu/shadps4/video_core/renderer_vulkan/nr_foveation.h"
++#include "../gpu/shadps4/video_core/renderer_vulkan/nr_foveation_trial.h"
++#include <cassert>
++#include <cstdio>
++#include <limits>
++using namespace NrFoveation;
++double Inverse(double v,const Axis& a) {
++    double lo=-8,hi=8;
++    for(int i=0;i<70;++i) {double m=(lo+hi)*0.5;if(Warp(m,a)<v)lo=m;else hi=m;}
++    return (lo+hi)*0.5;
++}
++int main() {
++    for(const char* fault:{"create","evaluate"}) {
++        TrialState state(fault);
++        const auto selected=state.fault;
++        assert(!state.Inject(selected,false)); // A disabled/uniform path cannot be injected.
++        assert(state.Inject(selected,true));
++        assert(!state.Inject(selected,true)); // Exactly once, even before rejection is consumed.
++        state.Reject(17);
++        assert(state.Pending(16) && state.Pending(17) && !state.Pending(18));
++        assert(state.rejected && !state.Inject(selected,true));
++        for(unsigned tick=18;tick<1000;++tick) assert(!state.Pending(tick));
++        // A failed warped create leaves new images but the old successful
++        // uniform feature key. The fallback must inspect actual image sizes.
++        const ResourceShape old_feature{1280,720,1280,720,1};
++        ResourceShape images{840,473,1280,720,1};
++        assert(!(images==old_feature));
++        assert(!state.Pending(18));
++        images=old_feature; // after safe reallocation at the submitted boundary
++        assert(images==old_feature);
++    }
++    assert(TrialState("invalid").fault==TrialState::Fault::None);
++    std::printf("NR trial state: create/evaluate injection, disabled bypass, submission retirement and no retry loop PASS\n");
++    unsigned samples=0;
++    for(auto size : {std::pair{1920u,1080u},std::pair{1280u,720u},std::pair{3440u,1440u},std::pair{7680u,2160u}}) {
++        const auto off=MakeGrid(false,{},size.first,size.second);
++        assert(!off.active() && Warp(-0.25,off.x)==-0.25 && WarpedExtent(size.first,off.x)==size.first);
++        for(float edge:{0.25f,0.5f,1.0f}) for(float centre:{0.1f,0.5f,1.0f}) for(float pos:{0.0f,0.5f,1.0f}) {
++            Params p;p.edge=edge;p.center_w=p.center_h=centre;p.center_x=p.center_y=pos;
++            auto g=MakeGrid(true,p,size.first,size.second);
++            for(const Axis* a:{&g.x,&g.y}) {
++                double previous=-1e30;
++                for(int i=-100;i<=1100;++i) {
++                    double n=i/1000.0,v=Warp(n,*a);
++                    assert(std::isfinite(v) && v>previous);previous=v;
++                    assert(std::abs(Inverse(v,*a)-n)<1e-9);
++                    // Crossing the ramp and even offscreen motion must preserve its sign.
++                    for(double motion:{-0.3,0.0,0.2}) {
++                        const double d=Warp(n+motion,*a)-v;
++                        assert(motion==0?std::abs(d)<1e-12:d*motion>0);
++                    }
++                    ++samples;
++                }
++            }
++        }
++        const auto fixed=MakeGrid(true,{},size.first,size.second);
++        assert(fixed.active() && fixed.PixelFactor()<0.45);
++        const unsigned w=WarpedExtent(size.first,fixed.x),h=WarpedExtent(size.second,fixed.y);
++        printf("fixed grid %ux%u -> %ux%u, tensor area %.2f%% (forecast only)\n",size.first,size.second,w,h,100.0*w*h/size.first/size.second);
++        // Full centre density is retained relative to uniform model, to rounding.
++        const double derivative=(Warp(0.501,fixed.x)-Warp(0.499,fixed.x))/0.002;
++        assert(std::abs(derivative*w/size.first-1)<0.002);
++    }
++    Params p;p.center_w=p.center_h=1;p.contour_w=p.contour_h=0;
++    assert(!MakeGrid(true,p,1920,1080).active());
++    p={};p.center_w=p.center_h=0.99f;p.contour_w=p.contour_h=0.01f;p.edge=1;
++    Inactive why{};assert(!MakeGrid(true,p,1920,1080,&why).active());
++    p={};p.center_w=std::numeric_limits<float>::quiet_NaN();
++    assert(MakeGrid(true,p,1920,1080).active());
++    printf("NR foveation: %u coordinate samples; inverse, monotonicity, endpoint signs, centre density, identity/low-saving bypass PASS\n",samples);
++}
+diff --git a/tests/test_hdr_native.cpp b/tests/test_hdr_native.cpp
+--- a/tests/test_hdr_native.cpp
++++ b/tests/test_hdr_native.cpp
+@@ -8,6 +8,7 @@
+ #include <vulkan/vulkan.h>
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <array>
+ #include <cassert>
+ #include <cmath>
+@@ -25,6 +26,8 @@
+ #include "video_core/host_shaders/dlss_nr_comp.h"
+ #include "video_core/host_shaders/dlss_nr_look_comp.h"
+ #include "video_core/host_shaders/dlss_nr_scaled_comp.h"
++#include "video_core/host_shaders/dlss_nr_foveated_comp.h"
++#include "../gpu/shadps4/video_core/renderer_vulkan/nr_foveation.h"
+ 
+ namespace {
+ 
+@@ -90,8 +93,17 @@
+     return uint8_t(std::lround(std::pow(std::clamp(linear, 0.0f, 1.0f), 1.0f / 2.2f) * 255.0f));
+ }
+ 
++std::atomic<unsigned> validation_errors{0};
++VKAPI_ATTR VkBool32 VKAPI_CALL ValidationMessage(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
++    VkDebugUtilsMessageTypeFlagsEXT, const VkDebugUtilsMessengerCallbackDataEXT* data, void*) {
++    if(severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) ++validation_errors;
++    std::fprintf(stderr,"VULKAN_VALIDATION severity=%u id=%s: %s\n",unsigned(severity),
++        data->pMessageIdName?data->pMessageIdName:"unknown",data->pMessage?data->pMessage:"");
++    return VK_FALSE;
++}
+ struct Vk {
+     VkInstance instance{};
++    VkDebugUtilsMessengerEXT messenger{};
+     VkPhysicalDevice physical{};
+     VkDevice device{};
+     VkQueue queue{};
+@@ -356,11 +368,33 @@
+         .pApplicationName = "hdr-native-shader-test",
+         .apiVersion = VK_API_VERSION_1_3,
+     };
++    const bool validation=std::getenv("BB_TEST_VALIDATION") && std::strcmp(std::getenv("BB_TEST_VALIDATION"),"1")==0;
++    const char* layer="VK_LAYER_KHRONOS_validation";
++    if(validation) {
++        uint32_t count=0;CHECK(vkEnumerateInstanceLayerProperties(&count,nullptr));
++        std::vector<VkLayerProperties> layers(count);CHECK(vkEnumerateInstanceLayerProperties(&count,layers.data()));
++        bool found=false;for(const auto& p:layers) if(std::strcmp(p.layerName,layer)==0)found=true;
++        if(!found) {std::fprintf(stderr,"BLOCKED: requested Khronos validation layer is unavailable; no validation PASS claimed\n");std::exit(77);}
++    }
++    const std::array<const char*,2> extensions{VK_EXT_DEBUG_UTILS_EXTENSION_NAME,VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME};
++    const VkDebugUtilsMessengerCreateInfoEXT debug{
++        .sType=VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
++        .messageSeverity=VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT|VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
++        .messageType=VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT|VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT|VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
++        .pfnUserCallback=ValidationMessage};
++    const VkValidationFeatureEnableEXT enabled=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT;
++    const VkValidationFeaturesEXT validation_features{.sType=VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,.pNext=&debug,
++        .enabledValidationFeatureCount=1,.pEnabledValidationFeatures=&enabled};
+     const VkInstanceCreateInfo instance_info{
+-        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+-        .pApplicationInfo = &app,
+-    };
+-    CHECK(vkCreateInstance(&instance_info, nullptr, &vk.instance));
++        .sType=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,.pNext=validation?&validation_features:nullptr,
++        .pApplicationInfo=&app,.enabledLayerCount=validation?1u:0u,.ppEnabledLayerNames=validation?&layer:nullptr,
++        .enabledExtensionCount=validation?2u:0u,.ppEnabledExtensionNames=validation?extensions.data():nullptr};
++    CHECK(vkCreateInstance(&instance_info,nullptr,&vk.instance));
++    if(validation) {
++        auto create=reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(vk.instance,"vkCreateDebugUtilsMessengerEXT"));
++        assert(create);CHECK(create(vk.instance,&debug,nullptr,&vk.messenger));
++        std::printf("Khronos runtime validation and synchronization validation ENABLED\n");
++    }
+     uint32_t count = 0;
+     CHECK(vkEnumeratePhysicalDevices(vk.instance, &count, nullptr));
+     std::vector<VkPhysicalDevice> devices(count);
+@@ -390,6 +424,13 @@
+     vkGetPhysicalDeviceFeatures(vk.physical, &supported);
+     assert(supported.shaderStorageImageExtendedFormats); // rg16f / r16f storage
+     const VkPhysicalDeviceFeatures features{.shaderStorageImageExtendedFormats = VK_TRUE};
++    // Match the renderer's enabled scalar layout for the 68-byte foveation block.
++    VkPhysicalDeviceVulkan12Features vk12{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
++    VkPhysicalDeviceFeatures2 queried{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vk12};
++    vkGetPhysicalDeviceFeatures2(vk.physical, &queried);
++    assert(vk12.scalarBlockLayout);
++    const VkPhysicalDeviceVulkan12Features enabled12{
++        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .scalarBlockLayout = VK_TRUE};
+     const float priority = 1.0f;
+     const VkDeviceQueueCreateInfo queue_info{
+         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+@@ -399,6 +440,7 @@
+     };
+     const VkDeviceCreateInfo device_info{
+         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
++        .pNext = &enabled12,
+         .queueCreateInfoCount = 1,
+         .pQueueCreateInfos = &queue_info,
+         .pEnabledFeatures = &features,
+@@ -663,8 +705,15 @@
+ // Exercise the actual reduced-model shader without the proprietary runtime. An
+ // identity model must preserve full-resolution high-frequency detail and alpha;
+ // guides must select a common foreground surface and use MODEL pixel motion.
+-void TestNrScaled(const Vk& vk) {
+-    constexpr unsigned MW = 48, MH = 24;
++double UnwarpReference(double v, const NrFoveation::Axis& a) {
++    double lo=-8,hi=8;
++    for(int i=0;i<70;++i) { double m=(lo+hi)*0.5; if(NrFoveation::Warp(m,a)<v)lo=m;else hi=m; }
++    return (lo+hi)*0.5;
++}
++void TestNrScaled(const Vk& vk, bool foveated=false) {
++    const auto grid=NrFoveation::MakeGrid(foveated,{},W,H);
++    const unsigned MW=foveated ? NrFoveation::WarpedExtent(W,grid.x) : 48;
++    const unsigned MH=foveated ? NrFoveation::WarpedExtent(H,grid.y) : 24;
+     const std::array<VkDescriptorPoolSize, 2> sizes{{
+         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 5}, {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 4}}};
+     VkDescriptorPool pool{};
+@@ -675,8 +724,9 @@
+         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}, 36,
+-        DLSS_NR_SCALED_COMP, sizeof(DLSS_NR_SCALED_COMP));
++        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE}, foveated ? 68 : 36,
++        foveated ? DLSS_NR_FOVEATED_COMP : DLSS_NR_SCALED_COMP,
++        foveated ? sizeof(DLSS_NR_FOVEATED_COMP) : sizeof(DLSS_NR_SCALED_COMP));
+     std::array<Image, 8> images{
+         MakeImage(vk, VK_FORMAT_R16G16B16A16_SFLOAT, W, H, 8),
+         MakeImage(vk, VK_FORMAT_R32_SFLOAT, W, H, 4),
+@@ -716,7 +766,12 @@
+         }
+         vkUpdateDescriptorSets(vk.device, unsigned(writes.size()), writes.data(), 0, nullptr);
+     };
+-    struct Push { uint32_t mode, width, height, hdr; float white, strength; uint32_t sw, sh; uint32_t composition = 0; };
++    struct Push { uint32_t mode, width, height, hdr; float white, strength; uint32_t sw, sh; uint32_t composition = 0;
++        uint32_t x=0,y=0; float cx=0.5f,cy=0.5f; uint32_t bx=0,by=0; float fx=0,fy=0; };
++    const unsigned push_size=foveated ? 68 : 36;
++    static_assert(sizeof(Push)==68);
++    const auto push_grid=[&](Push p) { p.x=grid.x.packed;p.y=grid.y.packed;p.cx=grid.x.center;p.cy=grid.y.center;
++        p.bx=grid.x.bounds;p.by=grid.y.bounds;p.fx=grid.x.blend;p.fy=grid.y.blend;return p; };
+     std::vector<uint16_t> input(W * H * 4), motion(W * H * 2);
+     std::vector<float> depth(W * H);
+     for (unsigned hdr = 0; hdr < 2; ++hdr) {
+@@ -735,22 +790,26 @@
+         Upload(vk, staging, images[1], depth.data());
+         Upload(vk, staging, images[2], motion.data());
+         bind(false);
+-        const Push encode{0, MW, MH, hdr, 2.971f, 1.0f, W, H};
+-        Begin(vk); Dispatch(vk.cmd, pass, &encode, sizeof(encode), (MW + 7) / 8, (MH + 7) / 8); Submit(vk);
++        const Push encode=push_grid({0, MW, MH, hdr, 2.971f, 1.0f, W, H});
++        Begin(vk); Dispatch(vk.cmd, pass, &encode, push_size, (MW + 7) / 8, (MH + 7) / 8); Submit(vk);
+         const auto proxy = Download<uint16_t>(vk, staging, images[3]);
+         const auto reduced_depth = Download<float>(vk, staging, images[5]);
+         const auto reduced_motion = Download<uint16_t>(vk, staging, images[6]);
+         for (unsigned y = 0; y < MH; ++y) for (unsigned x = 0; x < MW; ++x) {
+             const unsigned i = y * MW + x;
+-            const bool foreground = float(x) * W / MW < 31.0f;
++            const double nx=UnwarpReference((x+0.5)/MW,grid.x), ny=UnwarpReference((y+0.5)/MH,grid.y);
++            const bool foreground = (foveated ? UnwarpReference(double(x)/MW,grid.x)*W : double(x)*W/MW) < 31.0;
+             assert(std::abs(reduced_depth[i] - (foreground ? 0.2f : 0.8f)) < 1e-6f);
+-            assert(std::abs(FromHalf(reduced_motion[i * 2]) - (foreground ? 6.0f : -12.0f)) < 0.01f);
+-            assert(std::abs(FromHalf(reduced_motion[i * 2 + 1]) - (foreground ? -3.0f : 4.5f)) < 0.01f);
++            const double mx=foreground?8.0:-16.0, my=foreground?-4.0:6.0;
++            const double ex=foveated ? (NrFoveation::Warp(nx+mx/W,grid.x)-(x+0.5)/MW)*MW : mx*MW/W;
++            const double ey=foveated ? (NrFoveation::Warp(ny+my/H,grid.y)-(y+0.5)/MH)*MH : my*MH/H;
++            assert(std::abs(FromHalf(reduced_motion[i*2])-ex)<0.02);
++            assert(std::abs(FromHalf(reduced_motion[i*2+1])-ey)<0.02);
+         }
+         Upload(vk, staging, images[4], proxy.data());
+         bind(true);
+-        const Push resolve{1, MW, MH, hdr, 2.971f, 1.0f, W, H};
+-        Begin(vk); Dispatch(vk.cmd, pass, &resolve, sizeof(resolve), (W + 7) / 8, (H + 7) / 8); Submit(vk);
++        const Push resolve=push_grid({1, MW, MH, hdr, 2.971f, 1.0f, W, H});
++        Begin(vk); Dispatch(vk.cmd, pass, &resolve, push_size, (W + 7) / 8, (H + 7) / 8); Submit(vk);
+         const auto identity = Download<uint16_t>(vk, staging, images[7]);
+         for (unsigned i = 0; i < input.size(); ++i) {
+             assert(std::isfinite(FromHalf(identity[i])));
+@@ -761,23 +820,34 @@
+         for (unsigned i = 0; i < MW * MH; ++i) for (unsigned c = 0; c < 3; ++c)
+             brighter[i * 4 + c] = ToHalf(std::min(0.95f, FromHalf(proxy[i * 4 + c]) * 1.1f));
+         Upload(vk, staging, images[4], brighter.data());
+-        Begin(vk); Dispatch(vk.cmd, pass, &resolve, sizeof(resolve), (W + 7) / 8, (H + 7) / 8); Submit(vk);
++        Begin(vk); Dispatch(vk.cmd, pass, &resolve, push_size, (W + 7) / 8, (H + 7) / 8); Submit(vk);
+         const auto changed = Download<uint16_t>(vk, staging, images[7]);
+         std::vector<uint16_t> edits(MW * MH * 4, ToHalf(2.0f));
+         Upload(vk, staging, images[4], edits.data());
+         Push log_resolve = resolve; log_resolve.composition = 1;
+-        Begin(vk); Dispatch(vk.cmd, pass, &log_resolve, sizeof(log_resolve), (W+7)/8, (H+7)/8); Submit(vk);
++        Begin(vk); Dispatch(vk.cmd, pass, &log_resolve, push_size, (W+7)/8, (H+7)/8); Submit(vk);
+         const auto log_result = Download<uint16_t>(vk, staging, images[7]);
+         for (unsigned i=0;i<W*H;++i) {
+-            assert(std::abs(FromHalf(log_result[4*i])-4*FromHalf(input[4*i]))<0.04f);
++            const double nx=(i%W+0.5)/W,ny=(i/W+0.5)/H;
++            const auto zone=[](double v,const NrFoveation::Axis& a) {
++                double lo,hi;NrFoveation::DecodeBounds(a.bounds,&lo,&hi);
++                const auto smooth=[](double q) {q=std::clamp(q,0.0,1.0);return q*q*(3-2*q);};
++                return (lo>0?smooth((v-lo)/std::max(1e-6f,a.blend)):1.0)*
++                       (hi<1?smooth((hi-v)/std::max(1e-6f,a.blend)):1.0);
++            };
++            const float gain=float(1+3*zone(nx,grid.x)*zone(ny,grid.y));
++            assert(std::abs(FromHalf(log_result[4*i])-gain*FromHalf(input[4*i]))<0.04f);
+             assert(log_result[4*i+3]==input[4*i+3]);
+         }
+-        assert(FromHalf(changed[W * 8 * 4]) > FromHalf(input[W * 8 * 4]) * 1.05f);
++        const unsigned centre=(H/2*W+W/2)*4;
++        assert(FromHalf(changed[centre]) > FromHalf(input[centre]) * 1.05f);
++        if(foveated) for(unsigned x=0;x<W;++x) for(unsigned c=0;c<4;++c)
++            assert(changed[x*4+c]==input[x*4+c]);
+         for (unsigned i = 0; i < W * H; ++i) {
+             assert(std::isfinite(FromHalf(changed[i * 4])));
+             assert(changed[i * 4 + 3] == input[i * 4 + 3]);
+         }
+-        std::printf("NR scaled shader: %s detail/alpha identity, depth edges, motion units, enhancement PASS\n", hdr ? "HDR" : "LDR");
++        std::printf("NR %s shader: %s detail/alpha identity, depth edges, exact motion endpoints, enhancement/outer bypass PASS\n", foveated ? "foveated" : "scaled", hdr ? "HDR" : "LDR");
+     }
+     vkDestroySampler(vk.device, sampler, nullptr);
+     vkDestroyPipeline(vk.device, pass.pipeline, nullptr);
+@@ -913,7 +983,17 @@
+ int main(int argc, char** argv) {
+     std::setvbuf(stdout, nullptr, _IONBF, 0); // the lines before a failed assert too
+     Vk vk = Init();
+-    if (argc > 1 && std::strcmp(argv[1], "--nr") == 0) { TestNrResolve(vk); TestNrScaled(vk); TestNrLook(vk); return 0; }
++    if (argc > 1 && std::strcmp(argv[1], "--nr") == 0) {
++        TestNrResolve(vk);TestNrScaled(vk);TestNrLook(vk);TestNrScaled(vk,true);
++        CHECK(vkDeviceWaitIdle(vk.device));vkDestroyCommandPool(vk.device,vk.pool,nullptr);vkDestroyDevice(vk.device,nullptr);
++        if(vk.messenger) {
++            auto destroy=reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(vk.instance,"vkDestroyDebugUtilsMessengerEXT"));
++            assert(destroy);destroy(vk.instance,vk.messenger,nullptr);
++        }
++        vkDestroyInstance(vk.instance,nullptr);
++        if(validation_errors.load()!=0) {std::fprintf(stderr,"FAIL: %u runtime validation errors\n",validation_errors.load());return 1;}
++        return 0;
++    }
+     VkDescriptorPool pool;
+     const std::array<VkDescriptorPoolSize, 3> sizes{{
+         {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 16},
+diff --git a/licenses/FoveatedDLSS5-MIT.txt b/licenses/FoveatedDLSS5-MIT.txt
+new file mode 100644
+--- /dev/null
++++ b/licenses/FoveatedDLSS5-MIT.txt
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2025 Carlos Lopez Jr.
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/gpu/cmake/LinkClosure.cmake b/gpu/cmake/LinkClosure.cmake
+--- a/gpu/cmake/LinkClosure.cmake
++++ b/gpu/cmake/LinkClosure.cmake
+@@ -15,11 +15,30 @@
+         if (aliased)
+             set(item "${aliased}")
+         endif()
+-        get_property(on_stack GLOBAL PROPERTY _BB_LINK_STACK)
+-        if ("${item}" IN_LIST on_stack)
++        # Reverse postorder visits every target once, even for large shared DAGs.
++        # A stack-only guard revisits all paths through Protobuf/Abseil and can
++        # take minutes before the final deduplication.
++        get_property(seen GLOBAL PROPERTY _BB_LINK_SEEN)
++        if ("${item}" IN_LIST seen)
+             return()
+         endif()
+-        set_property(GLOBAL APPEND PROPERTY _BB_LINK_STACK "${item}")
++        set_property(GLOBAL APPEND PROPERTY _BB_LINK_SEEN "${item}")
++        get_target_property(deps "${item}" INTERFACE_LINK_LIBRARIES)
++        if (deps)
++            list(REVERSE deps)
++            foreach(dep IN LISTS deps)
++                _bb_link_closure_visit("${dep}")
++            endforeach()
++        endif()
++        # Append each target's own block in reverse; the caller reverses the
++        # full result so every library follows all of its users.
++        get_target_property(options "${item}" INTERFACE_LINK_OPTIONS)
++        if (options)
++            list(REVERSE options)
++            foreach(option IN LISTS options)
++                set_property(GLOBAL APPEND PROPERTY _BB_LINK_ITEMS "${option}")
++            endforeach()
++        endif()
+         get_target_property(type "${item}" TYPE)
+         get_target_property(imported "${item}" IMPORTED)
+         if (type STREQUAL "SHARED_LIBRARY")
+@@ -27,21 +46,6 @@
+         elseif (type STREQUAL "STATIC_LIBRARY" OR (imported AND type STREQUAL "UNKNOWN_LIBRARY"))
+             set_property(GLOBAL APPEND PROPERTY _BB_LINK_ITEMS "$<TARGET_FILE:${item}>")
+         endif()
+-        get_target_property(options "${item}" INTERFACE_LINK_OPTIONS)
+-        if (options)
+-            foreach(option IN LISTS options)
+-                set_property(GLOBAL APPEND PROPERTY _BB_LINK_ITEMS "${option}")
+-            endforeach()
+-        endif()
+-        get_target_property(deps "${item}" INTERFACE_LINK_LIBRARIES)
+-        if (deps)
+-            foreach(dep IN LISTS deps)
+-                _bb_link_closure_visit("${dep}")
+-            endforeach()
+-        endif()
+-        get_property(on_stack GLOBAL PROPERTY _BB_LINK_STACK)
+-        list(REMOVE_ITEM on_stack "${item}")
+-        set_property(GLOBAL PROPERTY _BB_LINK_STACK "${on_stack}")
+     elseif (item MATCHES "^-" OR IS_ABSOLUTE "${item}")
+         set_property(GLOBAL APPEND PROPERTY _BB_LINK_ITEMS "${item}")
+     else()
+@@ -51,13 +55,12 @@
+ 
+ function(bb_write_link_closure target output)
+     set_property(GLOBAL PROPERTY _BB_LINK_ITEMS "")
+-    set_property(GLOBAL PROPERTY _BB_LINK_STACK "")
++    set_property(GLOBAL PROPERTY _BB_LINK_SEEN "")
+     _bb_link_closure_visit(${target})
+     get_property(items GLOBAL PROPERTY _BB_LINK_ITEMS)
+-    # Keep the last occurrence of each item: dependencies end up after all their users.
++    # Reverse postorder gives a dependency-correct order without repeated traversal.
+     list(REVERSE items)
+     list(REMOVE_DUPLICATES items)
+-    list(REVERSE items)
+     # SDL3's pkg-config adds -mwindows (GUI subsystem): bb-probe keeps its console output.
+     list(REMOVE_ITEM items -mwindows)
+     # The C++ runtime (the exe is linked by the C driver) and the Windows libraries the vendored
+diff --git a/gpu/dlssnr_forwarder.cpp b/gpu/dlssnr_forwarder.cpp
+--- a/gpu/dlssnr_forwarder.cpp
++++ b/gpu/dlssnr_forwarder.cpp
+@@ -4,6 +4,7 @@
+ #include <windows.h>
+ #include <initializer_list>
+ #include <cstdio>
++#include <cstdlib>
+ #include "nr_extra_style_win.h"
+ 
+ namespace {
+@@ -117,6 +118,8 @@
+     SetUI(parameters, "DLSSNR.UICorrection", unsigned(ui_correction));
+     void* feature = nullptr;
+     volatile int result = create(command_buffer, 18, parameters, &feature);
++    if (const char* profile=std::getenv("BB_DLSS_NR_PROFILE"); profile && *profile)
++        std::printf("DLSS NR NGX create: %ux%u preset=%d result=0x%08x handle=%p\n",width,height,preset,unsigned(result),feature);
+     if (result == 1 && feature) ++active_features;
+     return result == 1 ? feature : nullptr;
+ }
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/nr_foveation_trial.h b/gpu/shadps4/video_core/renderer_vulkan/nr_foveation_trial.h
+new file mode 100644
+--- /dev/null
++++ b/gpu/shadps4/video_core/renderer_vulkan/nr_foveation_trial.h
+@@ -0,0 +1,28 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#pragma once
++#include <cstdint>
++#include <string_view>
++namespace NrFoveation {
++struct ResourceShape {
++    std::uint32_t width{},height{},scene_width{},scene_height{};
++    int passes{};
++    bool operator==(const ResourceShape&) const = default;
++};
++// Developer-only rejection injection. It never injects into the uniform path.
++struct TrialState {
++    enum class Fault { None, Create, Evaluate };
++    Fault fault = Fault::None;
++    bool injected = false, rejected = false;
++    std::uint64_t retire_tick = 0;
++    explicit TrialState(const char* value = nullptr) {
++        if (value && std::string_view(value)=="create") fault=Fault::Create;
++        if (value && std::string_view(value)=="evaluate") fault=Fault::Evaluate;
++    }
++    bool Inject(Fault stage, bool foveated) {
++        if (!foveated || injected || rejected || fault!=stage || stage==Fault::None) return false;
++        injected=true;return true;
++    }
++    void Reject(std::uint64_t tick) { rejected=true;retire_tick=tick; }
++    bool Pending(std::uint64_t current_tick) const { return rejected && current_tick<=retire_tick; }
++};
++}
+diff --git a/tests/test_link_closure.py b/tests/test_link_closure.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_link_closure.py
+@@ -0,0 +1,29 @@
++"""Exercise the exported link line on a shared dependency DAG, aliases and LINK_ONLY."""
++from pathlib import Path
++import os,subprocess,tempfile
++engine=Path(__file__).resolve().parents[1]
++with tempfile.TemporaryDirectory(prefix='link-closure-',dir=os.environ.get('TEMP')) as tmp:
++    root=Path(tmp);source=root/'source';build=root/'build';source.mkdir()
++    lines=['cmake_minimum_required(VERSION 3.24)','project(link_closure C CXX)',
++           f'include("{(engine/"gpu/cmake/LinkClosure.cmake").as_posix()}")']
++    for i in range(14):
++        code=f'int f{i}(void){{return 1;}}' if i<2 else f'int f{i-1}(void);int f{i-2}(void);int f{i}(void){{return f{i-1}()+f{i-2}();}}'
++        (source/f'n{i}.c').write_text(code)
++        lines.append(f'add_library(n{i} STATIC n{i}.c)')
++        if i>=2:lines.append(f'target_link_libraries(n{i} PUBLIC n{i-1} "$<LINK_ONLY:n{i-2}>")')
++    lines+=['add_library(top ALIAS n13)','target_link_options(n13 INTERFACE -mwindows)',
++            'bb_write_link_closure(top "${CMAKE_BINARY_DIR}/closure.txt")']
++    (source/'CMakeLists.txt').write_text('\n'.join(lines))
++    subprocess.run(['cmake','-G','Ninja','-S',str(source),'-B',str(build),'-DCMAKE_C_COMPILER=clang','-DCMAKE_CXX_COMPILER=clang++'],check=True,timeout=30)
++    subprocess.run(['cmake','--build',str(build),'--parallel','4'],check=True,timeout=60)
++    items=(build/'closure.txt').read_text().splitlines()
++    libs=[x for x in items if x.endswith('.a')]
++    assert len(libs)==14 and len(set(libs))==14,items
++    indices={int(Path(x).stem.removeprefix('libn')):items.index(x) for x in libs}
++    for i in range(2,14):assert indices[i]<indices[i-1] and indices[i]<indices[i-2],items
++    assert '-mwindows' not in items
++    (source/'main.c').write_text('int f13(void);int main(void){return f13()==377?0:1;}')
++    exe=build/'linked.exe'
++    subprocess.run(['clang',str(source/'main.c'),*items,'-o',str(exe)],check=True,timeout=30)
++    subprocess.run([str(exe)],check=True,timeout=10)
++    print('PASS: 14-node shared DAG, alias/LINK_ONLY, dependency ordering, unique libraries and actual external link/execution')

@@ -1,0 +1,57 @@
+{
+  "description": "M2-D live one-pass Legacy pre-SR foveation controls; apply after nr-foveation-poc. Gameplay acceptance remains pending.",
+  "bloodbornex_commit": "de39d563733cbccdda38181bbe97d8b2beb1ac20",
+  "upstream_commit": "0d875756506ffb581a886892ecdbc9a66a6cefd5",
+  "files": [
+    {
+      "path": "gpu/shim/bbport_settings.h",
+      "baseline_sha256": "0fe4c8e6f7153b64c75cbfef2b8ef7aad40b5e49904e6430ff3917778920482e",
+      "modified_sha256": "ef0c94ec30d45f996bf063e19cf8697a1f5388df24b690d43b38a15d632117bf"
+    },
+    {
+      "path": "gpu/shim/bbport_settings.cpp",
+      "baseline_sha256": "0a17190f4fe8383e32ff88220c835def02fb595cc07f569ff6b416387dc802e8",
+      "modified_sha256": "12d017bcaee3c1971f97e7455627f7d417ce68fd698301fc517d676d8be7d0d9"
+    },
+    {
+      "path": "gpu/shim/bbport_overlay.cpp",
+      "baseline_sha256": "b5311ff29adf425ee17dccfc29a1d89c151ce0c50dd42e34a9c446bcd6f6185f",
+      "modified_sha256": "30a6a031d67aa485d8c177eb7f0b4418cfc5a9107e9e015886aa469276c6faf9"
+    },
+    {
+      "path": "gpu/shim/bbport_preset_bindings.inc",
+      "baseline_sha256": "089cb465e5a1d0044fa137a8d20746b09977ea4527cfc8d4afca448aff46138b",
+      "modified_sha256": "66932a811d4958cc32ecdf23b27e258ca3d976cb27ae8c368fb35500c40f60e4"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/nr_foveation.h",
+      "baseline_sha256": "c16092bb389cf1b56ff10a54571e6aa59d00480b49684b6fb3d37914a77b18a4",
+      "modified_sha256": "bc2dc25bd32129f2ef24f39ca5fcbe4752e6be39bbf277d21df2fdc62d50d463"
+    },
+    {
+      "path": "gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp",
+      "baseline_sha256": "7a0d3371333916c4a960a8aa24616325b7c13264a354f7f88c51f956a684ee77",
+      "modified_sha256": "eed61ee3468bc2920a3e257ac67b24f36a1d9a2a83921d826b576f6c608846e6"
+    },
+    {
+      "path": "tests/test_nr_foveation.cpp",
+      "baseline_sha256": "f60f1a2093898725e2d2dad706b2effb841f052e8e530c9b3515ce6c00a5302c",
+      "modified_sha256": "22cec0c6ee5c83928c4518474f0fc805179aafe8ffaec2d7714f1efecb88dbb7"
+    },
+    {
+      "path": "tests/test_hdr_native.cpp",
+      "baseline_sha256": "72f40ac97db0dff0e07fe6af9b8f28975b3bc874202278c9a912e6720b1f9c68",
+      "modified_sha256": "72cac152a06ece02b5f1647270e6487c77769287e84c6219a27f78ac7a1fa224"
+    },
+    {
+      "path": "tests/test_settings.cpp",
+      "baseline_sha256": "9f44e700b7015877df42197b17516a0e7a387d921d5d26ff6095b09f51deff3a",
+      "modified_sha256": "a5d15d6cefaa6cc29c383ad2708975e772998a7953010654f333f66ff60f716e"
+    },
+    {
+      "path": "gpu/shim/bbport_custom_presets.inc",
+      "baseline_sha256": "7ba29fd192c50ffc3798cb5e16dc0e9f1e4e22439e78d14e7eef67ee354eb760",
+      "modified_sha256": "b23acad922861381b61cc304b8f0088a1b3f627f69115f5d7d8448dd880a03f2"
+    }
+  ]
+}

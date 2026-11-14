@@ -3,6 +3,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$EngineSource,
+    [string]$EngineOutput = '',
     [string]$Version = '1.0.1',
     [string]$ReleaseNotesFile = 'NR-1.0.1.md',
     [string]$ReleaseNotesPath = '',
@@ -24,7 +25,7 @@ $notes = if ($ReleaseNotesPath) { [IO.Path]::GetFullPath($ReleaseNotesPath) } el
 if (!(Test-Path -LiteralPath $notes -PathType Leaf)) { throw "Missing release notes: $notes" }
 if (Test-Path -LiteralPath $release) { throw "Refusing to overwrite existing release: $release" }
 $bin = Join-Path $MsysRoot 'clang64\bin'
-$out = Join-Path $engine 'out'
+$out = if ($EngineOutput) { (Resolve-Path -LiteralPath $EngineOutput).Path } else { Join-Path $engine 'out' }
 foreach ($file in @('bb-probe.exe','bb-gpu-capabilities.exe','bb-engine-assets.exe','bb-shader-lab.exe','nvngx.dll_dlssnr.dll','gpu-cache.id','gpu-cache.legacy.id')) {
     if (!(Test-Path -LiteralPath (Join-Path $out $file))) { throw "Missing tested engine output: $file" }
 }

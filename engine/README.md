@@ -148,6 +148,15 @@ CLANG64 DLLs it loads.
 GPL-3.0-or-later, like the engine.
 # Tier 2 acceptance batch (12 November 2026)
 
+The subsequent fixed one-pass native Vulkan foveation proof is maintained in
+`nr-foveation-poc.patch` and `nr-foveation-poc-baseline.json`. It targets the exact
+current applied source preimages, including newer local changes. Validate with
+`python tools/apply-nr-foveation-poc.py <complete-engine-source> --check` before
+applying. It is disabled by default, developer-only and not approved for gameplay,
+UI/multipass integration or release. See
+[`docs/FOVEATED-NR-INTEGRATION.md`](../docs/FOVEATED-NR-INTEGRATION.md) for actual
+checks, missing validation/performance gates and reproduction commands.
+
 After the existing Tier 1 and `tier2-modern-dof` supplements, apply
 `python tools/apply-tier2-batch.py <complete-engine-source>`. Its manifest verifies
 the entire preimage before changing files; `--check` replays the patch without
@@ -178,3 +187,12 @@ the provided RTX 3070 profiles stay immutable. See the same report for the curre
 Picture layout and preset overwrite validation.
 See `docs/tier2-graphics/07-picture-controls.md`. The owner's requested delivery
 updates the existing rc7 portable folder; existing ZIP archives are retained.
+
+M2-D live foveation controls are a separate `nr-foveation-live.patch` supplement,
+with exact preimages in `nr-foveation-live-baseline.json`. Apply **after** the
+existing `nr-foveation-poc.patch` using
+`python tools/apply-nr-foveation-live.py <complete-applied-engine>` (`--check`
+for validation). Already-applied source ZIPs require neither patch again.
+This keeps NR before SR and limits foveation to one-pass Legacy. The shader's
+upstream feather was already present; live controls and preview now expose it
+for visual acceptance. See the M2-D appendix in `docs/FOVEATED-NR-INTEGRATION.md`.

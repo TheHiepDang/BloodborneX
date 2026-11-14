@@ -1,0 +1,559 @@
+diff --git a/gpu/shim/bbport_settings.h b/gpu/shim/bbport_settings.h
+--- a/gpu/shim/bbport_settings.h
++++ b/gpu/shim/bbport_settings.h
+@@ -157,6 +157,18 @@
+     std::atomic<float> dlss_nr_extra_style_applied{0.0f};
+     std::atomic<const char*> dlss_nr_extra_style_problem{nullptr};
+     // Native log-edit processing. Legacy (0) remains the default.
++    // Percentages use upstream foveation semantics; defaults remain opt-in.
++    std::atomic<bool> dlss_nr_foveation{false};
++    std::atomic<float> dlss_nr_fov_center_w{50.0f};
++    std::atomic<float> dlss_nr_fov_center_h{50.0f};
++    std::atomic<float> dlss_nr_fov_contour_w{25.0f};
++    std::atomic<float> dlss_nr_fov_contour_h{25.0f};
++    std::atomic<float> dlss_nr_fov_falloff{50.0f};
++    std::atomic<float> dlss_nr_fov_blend{25.0f};
++    std::atomic<float> dlss_nr_fov_edge{50.0f};
++    std::atomic<float> dlss_nr_fov_center_x{50.0f};
++    std::atomic<float> dlss_nr_fov_center_y{50.0f};
++    std::atomic<int> dlss_nr_fov_preview{1}; // off / menu / always
+     std::atomic<int> dlss_nr_composition{0};
+     std::atomic<bool> dlss_nr_look{true};
+     std::atomic<int> dlss_nr_detail_stability{0};
+diff --git a/gpu/shim/bbport_settings.cpp b/gpu/shim/bbport_settings.cpp
+--- a/gpu/shim/bbport_settings.cpp
++++ b/gpu/shim/bbport_settings.cpp
+@@ -170,6 +170,28 @@
+         v.dlss_nr_skin_structure = Clamp(std::isfinite(f) ? f : -1.0f, -1.0f, 2.0f);
+     } else if (key == "dlss_nr_auto_mask") {
+         v.dlss_nr_auto_mask = i != 0;
++    } else if (key == "dlss_nr_foveation") {
++        v.dlss_nr_foveation = i != 0;
++    } else if (key == "dlss_nr_fov_preview") {
++        v.dlss_nr_fov_preview = std::clamp(i, 0, 2);
++    } else if (key == "dlss_nr_fov_center_w") {
++        v.dlss_nr_fov_center_w = Clamp(std::isfinite(f) ? f : 50.0f, 10.0f, 100.0f);
++    } else if (key == "dlss_nr_fov_center_h") {
++        v.dlss_nr_fov_center_h = Clamp(std::isfinite(f) ? f : 50.0f, 10.0f, 100.0f);
++    } else if (key == "dlss_nr_fov_contour_w") {
++        v.dlss_nr_fov_contour_w = Clamp(std::isfinite(f) ? f : 25.0f, 0.0f, 90.0f);
++    } else if (key == "dlss_nr_fov_contour_h") {
++        v.dlss_nr_fov_contour_h = Clamp(std::isfinite(f) ? f : 25.0f, 0.0f, 90.0f);
++    } else if (key == "dlss_nr_fov_falloff") {
++        v.dlss_nr_fov_falloff = Clamp(std::isfinite(f) ? f : 50.0f, 0.0f, 100.0f);
++    } else if (key == "dlss_nr_fov_blend") {
++        v.dlss_nr_fov_blend = Clamp(std::isfinite(f) ? f : 25.0f, 0.0f, 100.0f);
++    } else if (key == "dlss_nr_fov_edge") {
++        v.dlss_nr_fov_edge = Clamp(std::isfinite(f) ? f : 50.0f, 25.0f, 100.0f);
++    } else if (key == "dlss_nr_fov_center_x") {
++        v.dlss_nr_fov_center_x = Clamp(std::isfinite(f) ? f : 50.0f, 0.0f, 100.0f);
++    } else if (key == "dlss_nr_fov_center_y") {
++        v.dlss_nr_fov_center_y = Clamp(std::isfinite(f) ? f : 50.0f, 0.0f, 100.0f);
+     } else if (key == "dlss_nr_composition") {
+         v.dlss_nr_composition = std::clamp(i, 0, 1);
+     } else if (key == "dlss_nr_look") {
+@@ -642,6 +664,15 @@
+         &Values::dlss_nr_halo,
+         &Values::dlss_nr_dark_halo,
+         &Values::dlss_nr_stabilize_ms,
++        &Values::dlss_nr_fov_center_w,
++        &Values::dlss_nr_fov_center_h,
++        &Values::dlss_nr_fov_contour_w,
++        &Values::dlss_nr_fov_contour_h,
++        &Values::dlss_nr_fov_falloff,
++        &Values::dlss_nr_fov_blend,
++        &Values::dlss_nr_fov_edge,
++        &Values::dlss_nr_fov_center_x,
++        &Values::dlss_nr_fov_center_y,
+         &Values::dlss_nr_extra_style, &Values::dlss_nr_intensity, &Values::dlss_nr_local_structure, &Values::dlss_nr_local_tone,
+         &Values::dlss_nr_skin_structure, &Values::dlss_nr_white_point, &Values::dlss_nr_model_scale,
+     };
+@@ -660,6 +691,11 @@
+     case MenuLanguage::Russian: return russian;
+     default: return MenuTranslation(language, english);
+     }
++}
++
++void ClampFoveation(Values& v) {
++    v.dlss_nr_fov_contour_w=std::min(float(v.dlss_nr_fov_contour_w),100.0f-float(v.dlss_nr_fov_center_w));
++    v.dlss_nr_fov_contour_h=std::min(float(v.dlss_nr_fov_contour_h),100.0f-float(v.dlss_nr_fov_center_h));
+ }
+ 
+ void Load() {
+@@ -725,6 +761,10 @@
+     if (std::getenv("BB_HDR_PEAK")) {
+         v.hdr_peak_auto = false; // a peak given for this run is meant
+     }
++    // Developer initializer only: after Load the in-game toggle remains authoritative.
++    if (const char* mode = std::getenv("BB_DLSS_NR_FOVEATION_POC"))
++        v.dlss_nr_foveation = std::strcmp(mode, "1") == 0;
++    ClampFoveation(v);
+     v.startup_preset = v.preset;
+     v.startup_render_scale = v.render_scale;
+     v.startup_frame_gen = v.frame_gen;
+@@ -923,6 +963,17 @@
+     put("dlss_nr_auto_mask", flag(v.dlss_nr_auto_mask));
+     put("dlss_nr_extra_style", fixed(v.dlss_nr_extra_style, 2));
+     put("dlss_nr_white_point", fixed(v.dlss_nr_white_point, 3));
++    put("dlss_nr_foveation", flag(v.dlss_nr_foveation));
++    put("dlss_nr_fov_preview", std::to_string(v.dlss_nr_fov_preview.load()));
++    put("dlss_nr_fov_center_w", fixed(v.dlss_nr_fov_center_w, 3));
++    put("dlss_nr_fov_center_h", fixed(v.dlss_nr_fov_center_h, 3));
++    put("dlss_nr_fov_contour_w", fixed(v.dlss_nr_fov_contour_w, 3));
++    put("dlss_nr_fov_contour_h", fixed(v.dlss_nr_fov_contour_h, 3));
++    put("dlss_nr_fov_falloff", fixed(v.dlss_nr_fov_falloff, 3));
++    put("dlss_nr_fov_blend", fixed(v.dlss_nr_fov_blend, 3));
++    put("dlss_nr_fov_edge", fixed(v.dlss_nr_fov_edge, 3));
++    put("dlss_nr_fov_center_x", fixed(v.dlss_nr_fov_center_x, 3));
++    put("dlss_nr_fov_center_y", fixed(v.dlss_nr_fov_center_y, 3));
+     put("dlss_nr_composition", std::to_string(v.dlss_nr_composition.load()));
+     put("dlss_nr_look", flag(v.dlss_nr_look));
+     put("dlss_nr_detail_stability", std::to_string(v.dlss_nr_detail_stability.load()));
+diff --git a/gpu/shim/bbport_overlay.cpp b/gpu/shim/bbport_overlay.cpp
+--- a/gpu/shim/bbport_overlay.cpp
++++ b/gpu/shim/bbport_overlay.cpp
+@@ -31,6 +31,7 @@
+ #include "video_core/renderer_vulkan/vk_instance.h"
+ #include "video_core/renderer_vulkan/vk_optiscaler.h"
+ #include "video_core/renderer_vulkan/vk_scheduler.h"
++#include "video_core/renderer_vulkan/nr_foveation.h"
+ 
+ // DejaVu Sans (Latin with Latin Extended, Greek, Cyrillic), embedded (third_party/fonts, Bitstream
+ // Vera license).
+@@ -1243,6 +1244,93 @@
+         Hint("Experimental feature 18 pass before DLSS SR/DLAA. Requires the validated, user-supplied "
+              "nvngx_dlssnr.dll and Lantern's nvngx.dll_dlssnr.dll forwarder. Failures bypass only NR.");
+     }
++    Section("Foveated Neural Rendering");
++    // Keep the reference view read-only; canonical snapshots already obey these limits.
++    if(!preset_reference_mode) {
++    // Keep both stored and effective relationships valid, including after centre edits.
++    Store(s.dlss_nr_fov_contour_w,std::min(float(s.dlss_nr_fov_contour_w),100.0f-float(s.dlss_nr_fov_center_w)),
++        s.dlss_nr_fov_contour_w>100.0f-float(s.dlss_nr_fov_center_w));
++    Store(s.dlss_nr_fov_contour_h,std::min(float(s.dlss_nr_fov_contour_h),100.0f-float(s.dlss_nr_fov_center_h)),
++        s.dlss_nr_fov_contour_h>100.0f-float(s.dlss_nr_fov_center_h));
++    }
++    if (const char* label=Item("Enable foveated NR (Experimental)",nullptr,"dlss_nr_foveation")) {
++        Checkbox(label,s.dlss_nr_foveation);
++        Hint("Experimental: intended for ultrawide screens. Preserves full-quality NR in the centre while reducing neural processing toward the edges. Live, pre-SR foveation; one-pass Legacy only. Unsupported modes safely use standard NR.");
++    }
++    if(s.dlss_nr_passes!=1 || s.dlss_nr_composition!=0)
++        ImGui::TextWrapped("Foveation unavailable: select one NR pass and Legacy composition.");
++    if (const char* label=Item("Centre width",nullptr,"dlss_nr_fov_center_w")) {
++        Slider(label,s.dlss_nr_fov_center_w,10.0f,100.0f,"%.1f %%",ImGuiSliderFlags_AlwaysClamp);
++        Hint("Share of full scene width at full model density.");
++    }
++    if (const char* label=Item("Centre height",nullptr,"dlss_nr_fov_center_h")) {
++        Slider(label,s.dlss_nr_fov_center_h,10.0f,100.0f,"%.1f %%",ImGuiSliderFlags_AlwaysClamp);
++        Hint("Share of full scene height at full model density.");
++    }
++    if (const char* label=Item("Contour width",nullptr,"dlss_nr_fov_contour_w")) {
++        Slider(label,s.dlss_nr_fov_contour_w,0.0f,std::max(0.0f,100.0f-float(s.dlss_nr_fov_center_w)),"%.1f %%",ImGuiSliderFlags_AlwaysClamp);
++        Hint("Combined thickness on both sides; limited to the remaining scene width.");
++    }
++    if (const char* label=Item("Contour height",nullptr,"dlss_nr_fov_contour_h")) {
++        Slider(label,s.dlss_nr_fov_contour_h,0.0f,std::max(0.0f,100.0f-float(s.dlss_nr_fov_center_h)),"%.1f %%",ImGuiSliderFlags_AlwaysClamp);
++        Hint("Combined thickness on both sides; limited to the remaining scene height.");
++    }
++    if (const char* label=Item("Resolution falloff",nullptr,"dlss_nr_fov_falloff")) {
++        Slider(label,s.dlss_nr_fov_falloff,0.0f,100.0f,"%.1f %%",ImGuiSliderFlags_AlwaysClamp);
++        Hint("Smooth density transition across this share of the per-side contour.");
++    }
++    if (const char* label=Item("Border blending",nullptr,"dlss_nr_fov_blend")) {
++        Slider(label,s.dlss_nr_fov_blend,0.0f,100.0f,"%.1f %%",ImGuiSliderFlags_AlwaysClamp);
++        Hint("Smooth NR-effect fade inside the outer contour. 25% is upstream default; try 50, 75 and 100% to soften a visible border. No NGX rebuild.");
++    }
++    if (const char* label=Item("Edge density",nullptr,"dlss_nr_fov_edge")) {
++        Slider(label,s.dlss_nr_fov_edge,25.0f,100.0f,"%.1f %%",ImGuiSliderFlags_AlwaysClamp);
++        Hint("Density per axis relative to the full-quality centre, not model scale.");
++    }
++    if (const char* label=Item("Centre position X",nullptr,"dlss_nr_fov_center_x")) {
++        Slider(label,s.dlss_nr_fov_center_x,0.0f,100.0f,"%.1f %%",ImGuiSliderFlags_AlwaysClamp);
++        Hint("Requested horizontal position; snapped and clamped to keep the centre on screen.");
++    }
++    if (const char* label=Item("Centre position Y",nullptr,"dlss_nr_fov_center_y")) {
++        Slider(label,s.dlss_nr_fov_center_y,0.0f,100.0f,"%.1f %%",ImGuiSliderFlags_AlwaysClamp);
++        Hint("Requested vertical position; snapped and clamped to keep the centre on screen.");
++    }
++    if(!preset_reference_mode) {
++        Store(s.dlss_nr_fov_contour_w,std::min(float(s.dlss_nr_fov_contour_w),100.0f-float(s.dlss_nr_fov_center_w)),
++            s.dlss_nr_fov_contour_w>100.0f-float(s.dlss_nr_fov_center_w));
++        Store(s.dlss_nr_fov_contour_h,std::min(float(s.dlss_nr_fov_contour_h),100.0f-float(s.dlss_nr_fov_center_h)),
++            s.dlss_nr_fov_contour_h>100.0f-float(s.dlss_nr_fov_center_h));
++    }
++    if (const char* label=Item("Zone preview",nullptr,"dlss_nr_fov_preview")) {
++        const char* modes[]={"Off","While menu open","Always"}; int mode=s.dlss_nr_fov_preview;
++        if(ImGui::Combo(label,&mode,modes,3)) Store(s.dlss_nr_fov_preview,mode,true);
++        Hint("Green: full-quality centre; yellow: contour/off boundary; cyan: inner fade limits; white: scene. No extra image-processing pass.");
++    }
++    if(!preset_reference_mode && Shown("Reset foveation to upstream defaults")) {
++        if(ImGui::Button("Reset foveation to upstream defaults")) {
++            Store(s.dlss_nr_foveation,false,true); Store(s.dlss_nr_fov_preview,1,true);
++            Store(s.dlss_nr_fov_center_w,50.0f,true);
++            Store(s.dlss_nr_fov_center_h,50.0f,true);
++            Store(s.dlss_nr_fov_contour_w,25.0f,true);
++            Store(s.dlss_nr_fov_contour_h,25.0f,true);
++            Store(s.dlss_nr_fov_falloff,50.0f,true);
++            Store(s.dlss_nr_fov_blend,25.0f,true);
++            Store(s.dlss_nr_fov_edge,50.0f,true);
++            Store(s.dlss_nr_fov_center_x,50.0f,true);
++            Store(s.dlss_nr_fov_center_y,50.0f,true);
++        }
++    }
++    if(!preset_reference_mode && WholeSection()) {
++        const auto info=NrFoveation::ReadLive();
++        const bool disabled=!s.dlss_nr_foveation;
++        const bool eligible=s.dlss_nr && s.upscaler==BbSettings::UpscalerDlss;
++        ImGui::Text("Foveation: %s", disabled ? "Disabled" : !eligible ? "Bypassed" : info.state);
++        if(!disabled && !eligible) ImGui::TextWrapped("Requires active DLSS NR before SR/DLAA.");
++        else if(info.reason && *info.reason) ImGui::TextWrapped("%s",info.reason);
++        ImGui::Text("Working grid: %u x %u",info.model_w,info.model_h);
++        ImGui::Text("Estimated tensor-area saving: %.1f%%",100.0*(1.0-info.grid.PixelFactor()));
++        ImGui::TextDisabled("Pixel estimate only; not measured GPU time or FPS.");
++    }
+     Section("Input and conditioning");
+     if (const char* label = Item("Extra neural style", nullptr, "dlss_nr_extra_style")) {
+         Slider(label, s.dlss_nr_extra_style, -1024.0f, 1024.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+@@ -2498,8 +2586,34 @@
+     }
+ }
+ 
++void FoveationPreview() {
++    const auto& s=BbSettings::Get();
++    const int mode=s.dlss_nr_fov_preview;
++    if(!s.dlss_nr || !s.dlss_nr_foveation || s.upscaler!=BbSettings::UpscalerDlss ||
++        s.dlss_nr_passes!=1 || s.dlss_nr_composition!=0 || mode==0 || (mode==1 && !menu_open)) return;
++    const auto info=NrFoveation::ReadLive();
++    if(!info.grid.active()) return;
++    const auto* vp=ImGui::GetMainViewport();
++    auto* draw=ImGui::GetBackgroundDrawList();
++    const auto rect=[&](float l,float t,float r,float b,ImU32 colour) {
++        draw->AddRect({vp->Pos.x+l*vp->Size.x,vp->Pos.y+t*vp->Size.y},
++                      {vp->Pos.x+r*vp->Size.x,vp->Pos.y+b*vp->Size.y},colour,0,0,1.5f);
++    };
++    const auto& x=info.grid.x; const auto& y=info.grid.y;
++    const float a=float(NrFoveation::Decode(x.packed).a)*0.5f;
++    const float b=float(NrFoveation::Decode(y.packed).a)*0.5f;
++    double l,r,t,bot;
++    NrFoveation::DecodeBounds(x.bounds,&l,&r); NrFoveation::DecodeBounds(y.bounds,&t,&bot);
++    rect(0,0,1,1,IM_COL32(255,255,255,160));
++    rect(x.center-a,y.center-b,x.center+a,y.center+b,IM_COL32(80,255,110,220));
++    rect(float(l),float(t),float(r),float(bot),IM_COL32(255,210,70,220));
++    rect(float(l)+(l>0?x.blend:0),float(t)+(t>0?y.blend:0),
++         float(r)-(r<1?x.blend:0),float(bot)-(bot<1?y.blend:0),IM_COL32(60,230,255,220));
++}
++
+ bool Visible() {
+-    return initialized && (menu_open || prompt_active || BbSettings::Get().show_fps);
++    return initialized && (menu_open || prompt_active || BbSettings::Get().show_fps ||
++        (BbSettings::Get().dlss_nr && BbSettings::Get().dlss_nr_foveation && BbSettings::Get().dlss_nr_fov_preview==2));
+ }
+ 
+ bool MenuOpen() {
+@@ -2537,6 +2651,7 @@
+ 
+     ImGui_ImplVulkan_NewFrame();
+     ImGui::NewFrame();
++    FoveationPreview();
+     if (menu_open) {
+         Menu();
+     }
+diff --git a/gpu/shim/bbport_preset_bindings.inc b/gpu/shim/bbport_preset_bindings.inc
+--- a/gpu/shim/bbport_preset_bindings.inc
++++ b/gpu/shim/bbport_preset_bindings.inc
+@@ -26,6 +26,17 @@
+     {0, "Threshold", "reactive_threshold"},
+     {0, "Upscaler", "upscaler"},
+     {0, "Vulkan device on a thread of its own", "optiscaler_clean_thread"},
++    {1, "Enable foveated NR", "dlss_nr_foveation"},
++    {1, "Zone preview", "dlss_nr_fov_preview"},
++    {1, "Centre width", "dlss_nr_fov_center_w"},
++    {1, "Centre height", "dlss_nr_fov_center_h"},
++    {1, "Contour width", "dlss_nr_fov_contour_w"},
++    {1, "Contour height", "dlss_nr_fov_contour_h"},
++    {1, "Resolution falloff", "dlss_nr_fov_falloff"},
++    {1, "Border blending", "dlss_nr_fov_blend"},
++    {1, "Edge density", "dlss_nr_fov_edge"},
++    {1, "Centre position X", "dlss_nr_fov_center_x"},
++    {1, "Centre position Y", "dlss_nr_fov_center_y"},
+     {1, "Adjust NR's look", "dlss_nr_look"},
+     {1, "Brightening", "dlss_nr_brightening"},
+     {1, "Colour change", "dlss_nr_colour"},
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/nr_foveation.h b/gpu/shadps4/video_core/renderer_vulkan/nr_foveation.h
+--- a/gpu/shadps4/video_core/renderer_vulkan/nr_foveation.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/nr_foveation.h
+@@ -33,6 +33,7 @@
+ #include <cmath>
+ #include <cstdint>
+ #include <initializer_list>
++#include <mutex>
+ 
+ namespace NrFoveation {
+ 
+@@ -367,4 +368,44 @@
+   return (G(2.0 * (c - m0), p) + s * G(2.0 * std::abs(t), p)) / GTotal(c, m0, m1, p);
+ }
+ 
++// Shares are converted exactly once at the settings boundary.
++template<class S> Params SettingsParams(const S& s) {
++    Params p;
++    p.center_w = float(s.dlss_nr_fov_center_w) * 0.01f;
++    p.center_h = float(s.dlss_nr_fov_center_h) * 0.01f;
++    p.contour_w = float(s.dlss_nr_fov_contour_w) * 0.01f;
++    p.contour_h = float(s.dlss_nr_fov_contour_h) * 0.01f;
++    p.falloff = float(s.dlss_nr_fov_falloff) * 0.01f;
++    p.blend = float(s.dlss_nr_fov_blend) * 0.01f;
++    p.edge = float(s.dlss_nr_fov_edge) * 0.01f;
++    p.center_x = float(s.dlss_nr_fov_center_x) * 0.01f;
++    p.center_y = float(s.dlss_nr_fov_center_y) * 0.01f;
++    return p;
++}
++
++// Coherent renderer -> overlay snapshot; never copy atomic settings or touch NGX here.
++struct LiveInfo {
++    Grid grid{};
++    uint32_t scene_w{}, scene_h{}, model_w{}, model_h{};
++    const char* state = "Bypassed";
++    const char* reason = "Waiting for valid pre-SR NR inputs";
++};
++inline std::mutex live_mutex;
++inline LiveInfo live_info;
++inline void PublishLive(const LiveInfo& info) { std::scoped_lock lock(live_mutex); live_info=info; }
++inline LiveInfo ReadLive() { std::scoped_lock lock(live_mutex); return live_info; }
++
++struct LiveRequest {
++    Grid candidate{}, applied{};
++    uint64_t changed_at{};
++    bool settling{};
++    Grid Select(const Grid& requested, uint64_t now, bool debounce) {
++        if (requested != candidate) { candidate=requested; changed_at=now; }
++        settling=debounce && requested!=applied && now-changed_at<500;
++        if (!settling) applied=requested;
++        // Blend is excluded from mapping equality and never rebuilds temporal resources.
++        applied.x.blend=requested.x.blend; applied.y.blend=requested.y.blend;
++        return applied;
++    }
++};
+ }  // namespace NrFoveation
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_dlss_nr.cpp
+@@ -121,6 +121,7 @@
+         u32 scene_width{}, scene_height{};
+         float extra_style{};
+         bool foveated{};
++        NrFoveation::Grid grid{};
+         bool operator==(const Key&) const = default;
+     } key{};
+     VideoCore::UniqueImage proxy, original, model, resolved;
+@@ -144,6 +145,11 @@
+     vk::UniquePipelineLayout foveated_pipeline_layout;
+     vk::UniquePipeline foveated_pipeline;
+     NrFoveation::Grid foveation;
++    NrFoveation::LiveRequest foveation_request;
++    const char* foveation_reason = "Waiting for NR inputs";
++    void PublishFoveation(const Key& k, const char* state) {
++        NrFoveation::PublishLive({k.grid,k.scene_width,k.scene_height,k.width,k.height,state,foveation_reason});
++    }
+     NrFoveation::TrialState trial{std::getenv("BB_DLSS_NR_FOVEATION_FAULT")};
+     NrFoveation::ResourceShape resource_shape;
+     bool Scaled() const { return key.width != key.scene_width || key.height != key.scene_height; }
+@@ -510,19 +516,25 @@
+             std::chrono::steady_clock::now().time_since_epoch()).count();
+         wanted.extra_style = style_request.Select(requested, applied_extra_style, features[0] != nullptr, u64(now));
+         if (wanted.extra_style != 0) wanted.preset = 1; // Edited weights belong to Old/HT.
+-        // M2 developer-only fixed proof: no UI, multipass or warped look history.
+-        // Incompatible modes keep their existing uniform NR path.
+-        const char* opt = std::getenv("BB_DLSS_NR_FOVEATION_POC");
+-        if (!trial.rejected && opt && std::string_view(opt) == "1" && wanted.passes == 1 &&
+-            diagnostic_motion_scale == 1.0f &&
+-            s.dlss_nr_composition == 0 && model_width >= 32 && model_height >= 32) {
+-            const auto grid = NrFoveation::MakeGrid(true, {}, width, height);
+-            const auto w = NrFoveation::WarpedExtent(model_width, grid.x);
+-            const auto h = NrFoveation::WarpedExtent(model_height, grid.y);
+-            // Check actual rounded tensor area, not merely a forecast.
+-            if (grid.active() && double(w)*h <= double(model_width)*model_height*0.95) {
+-                wanted.width=w; wanted.height=h; wanted.foveated=true;
+-            }
++        NrFoveation::Inactive inactive{};
++        const bool enabled = s.dlss_nr_foveation;
++        const bool supported = wanted.passes==1 && s.dlss_nr_composition==0 &&
++            diagnostic_motion_scale==1.0f && model_width>=32 && model_height>=32;
++        const auto requested_grid = NrFoveation::MakeGrid(enabled && supported && !trial.rejected,
++            NrFoveation::SettingsParams(s), width, height, &inactive);
++        wanted.grid=foveation_request.Select(requested_grid,u64(now),
++            features[0] && enabled && supported && !trial.rejected && key.scene_width==width && key.scene_height==height);
++        foveation_reason = !enabled ? "Disabled by setting" : !supported ? "Requires one-pass Legacy NR and valid inputs" :
++            trial.rejected ? "Experimental NGX request rejected; standard NR fallback" :
++            inactive==NrFoveation::Inactive::kSavingTooSmall ? "Estimated savings below 5%" :
++            inactive==NrFoveation::Inactive::kCentreCoversScreen ? "Uniform full-density grid" : "";
++        const auto w=NrFoveation::WarpedExtent(model_width,wanted.grid.x);
++        const auto h=NrFoveation::WarpedExtent(model_height,wanted.grid.y);
++        if(wanted.grid.active() && double(w)*h<=double(model_width)*model_height*0.95) {
++            wanted.width=w; wanted.height=h; wanted.foveated=true;
++        } else {
++            if(wanted.grid.active()) foveation_reason="Rounded tensor savings below 5%";
++            wanted.grid={};
+         }
+         wanted.scene_width = width; wanted.scene_height = height;
+         for (int pass = 1; pass < wanted.passes; ++pass)
+@@ -538,7 +550,25 @@
+         // Retire that tick before rebuilding the uniform NR fallback.
+         if (trial.Pending(scheduler.CurrentTick())) return false;
+         Key wanted = Wanted(f.width, f.height);
++        PublishFoveation(key, foveation_request.settling ? "Rebuilding" :
++            !BbSettings::Get().dlss_nr_foveation ? "Disabled" : wanted.foveated ? "Active" : "Bypassed");
++        // Same tensor dimensions and conditioning: reset mapping history, reuse NGX.
++        auto same_feature=wanted; same_feature.grid=key.grid;
++        if (features[0] && same_feature==key && wanted.grid!=key.grid) {
++            if(feature_tick>=scheduler.CurrentTick()) { PublishFoveation(key,"Rebuilding"); return false; }
++            scheduler.WaitSubmittedWork();
++            history_reset=true; sr_reset_pending=true; look_valid=false;
++            key.grid=wanted.grid;
++            std::printf("DLSS NR foveation: mapping history reset; feature dimensions unchanged\n");
++        }
++        if(foveation.x.blend!=wanted.grid.x.blend || foveation.y.blend!=wanted.grid.y.blend)
++            std::printf("DLSS NR foveation feather live: %g/%g (shader parameters only)\n",wanted.grid.x.blend,wanted.grid.y.blend);
++        foveation=wanted.grid;
++        if (features[0] && wanted != key) PublishFoveation(key,"Rebuilding");
+         if (features[0] && wanted == key) {
++            key.grid=wanted.grid; // includes shader-only feather updates
++            PublishFoveation(key, foveation_request.settling ? "Rebuilding" :
++                !BbSettings::Get().dlss_nr_foveation ? "Disabled" : key.foveated ? "Active" : "Bypassed");
+             if (log_composition && !look_edits_view) {
+                 if (feature_tick >= scheduler.CurrentTick()) return false;
+                 scheduler.WaitSubmittedWork();
+@@ -595,8 +625,12 @@
+         }
+         if (log_composition && !look_edits_view) MakeLookResources(wanted.width, wanted.height);
+         look_valid = false;
+-        foveation = NrFoveation::MakeGrid(wanted.foveated, {}, f.width, f.height);
++        foveation = wanted.grid;
+         key = wanted; skip_first = true; history_reset = true; sr_reset_pending = true;
++        PublishFoveation(key, !BbSettings::Get().dlss_nr_foveation ? "Disabled" : key.foveated ? "Active" : "Bypassed");
++        std::printf("DLSS NR foveation effective: active=%d warp=%08x/%08x center=%g/%g bounds=%08x/%08x blend=%g/%g\n",
++            key.foveated,key.grid.x.packed,key.grid.y.packed,key.grid.x.center,key.grid.y.center,
++            key.grid.x.bounds,key.grid.y.bounds,key.grid.x.blend,key.grid.y.blend);
+         diagnostic_captured = false; diagnostic_frames = 0;
+         feature_tick = scheduler.CurrentTick();
+         BbSettings::Get().dlss_nr_effective_width = f.width;
+@@ -855,7 +889,11 @@
+ #ifdef _WIN32
+         if (!attempted) { Initialize(); Publish(); }
+ #endif
+-        if (!available) return false;
++        if (!available) {
++            foveation_reason="NR runtime unavailable; ordinary upscaling active";
++            PublishFoveation(key,"Bypassed");
++            return false;
++        }
+         BbSettings::Get().dlss_nr_state = 1;
+         BbSettings::Get().dlss_nr_problem = nullptr;
+         log_composition = BbSettings::Get().dlss_nr_composition == 1;
+diff --git a/tests/test_nr_foveation.cpp b/tests/test_nr_foveation.cpp
+--- a/tests/test_nr_foveation.cpp
++++ b/tests/test_nr_foveation.cpp
+@@ -68,5 +68,22 @@
+     Inactive why{};assert(!MakeGrid(true,p,1920,1080,&why).active());
+     p={};p.center_w=std::numeric_limits<float>::quiet_NaN();
+     assert(MakeGrid(true,p,1920,1080).active());
++    // Real live-control state helper: storms, blend-only changes and mapping reset keys.
++    {
++        LiveRequest request; Params controls;
++        auto a=MakeGrid(true,controls,1280,720);
++        assert(request.Select(a,0,false)==a);
++        controls.center_x=0.6f; auto b=MakeGrid(true,controls,1280,720);
++        assert(request.Select(b,100,true)==a && request.settling);
++        controls.center_x=0.7f; b=MakeGrid(true,controls,1280,720);
++        assert(request.Select(b,400,true)==a);
++        assert(request.Select(b,899,true)==a && request.settling);
++        assert(request.Select(b,900,true)==b && !request.settling);
++        controls.blend=1; auto feather=MakeGrid(true,controls,1280,720);
++        assert(feather==b && feather.x.blend>b.x.blend);
++        assert(request.Select(feather,901,true).x.blend==feather.x.blend && !request.settling);
++        assert(!request.Select({},902,false).active());
++    }
++    printf("NR foveation live: 500ms settle, drag debounce, shader-only feather and disabled bypass PASS\n");
+     printf("NR foveation: %u coordinate samples; inverse, monotonicity, endpoint signs, centre density, identity/low-saving bypass PASS\n",samples);
+ }
+diff --git a/tests/test_hdr_native.cpp b/tests/test_hdr_native.cpp
+--- a/tests/test_hdr_native.cpp
++++ b/tests/test_hdr_native.cpp
+@@ -710,8 +710,9 @@
+     for(int i=0;i<70;++i) { double m=(lo+hi)*0.5; if(NrFoveation::Warp(m,a)<v)lo=m;else hi=m; }
+     return (lo+hi)*0.5;
+ }
+-void TestNrScaled(const Vk& vk, bool foveated=false) {
+-    const auto grid=NrFoveation::MakeGrid(foveated,{},W,H);
++void TestNrScaled(const Vk& vk, bool foveated=false, float blend=0.25f) {
++    NrFoveation::Params controls; controls.blend=blend;
++    const auto grid=NrFoveation::MakeGrid(foveated,controls,W,H);
+     const unsigned MW=foveated ? NrFoveation::WarpedExtent(W,grid.x) : 48;
+     const unsigned MH=foveated ? NrFoveation::WarpedExtent(H,grid.y) : 24;
+     const std::array<VkDescriptorPoolSize, 2> sizes{{
+@@ -984,7 +985,7 @@
+     std::setvbuf(stdout, nullptr, _IONBF, 0); // the lines before a failed assert too
+     Vk vk = Init();
+     if (argc > 1 && std::strcmp(argv[1], "--nr") == 0) {
+-        TestNrResolve(vk);TestNrScaled(vk);TestNrLook(vk);TestNrScaled(vk,true);
++        TestNrResolve(vk);TestNrScaled(vk);TestNrLook(vk);for(float blend : {0.25f,0.50f,0.75f,1.0f}) TestNrScaled(vk,true,blend);
+         CHECK(vkDeviceWaitIdle(vk.device));vkDestroyCommandPool(vk.device,vk.pool,nullptr);vkDestroyDevice(vk.device,nullptr);
+         if(vk.messenger) {
+             auto destroy=reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(vk.instance,"vkDestroyDebugUtilsMessengerEXT"));
+diff --git a/tests/test_settings.cpp b/tests/test_settings.cpp
+--- a/tests/test_settings.cpp
++++ b/tests/test_settings.cpp
+@@ -36,6 +36,7 @@
+ 
+     BbSettings::Load();
+     auto& s = BbSettings::Get();
++    assert(!s.dlss_nr_foveation && s.dlss_nr_fov_blend==25.0f && s.dlss_nr_fov_preview==1);
+     assert(s.upscaler == BbSettings::UpscalerFsr3 && !s.show_fps && s.menu_x < 0.0f);
+     assert(s.graphics_dof_mode==0 && s.startup_dof_mode==0 && s.graphics_dof_intensity==1.0f);
+     s.graphics_dof_mode=1; s.graphics_dof_intensity=2.5f;
+@@ -674,9 +675,33 @@
+     BbSettings::Load();
+     assert(BbSettings::ListCustomPresets(error).size()==1); // separate storage survives settings reload
+     assert(BbSettings::DeleteCustomPreset(records[1].path,error));
+-    std::filesystem::remove_all(library_root);
+     std::puts("PASS: custom presets: selective apply, library CRUD, export/import, isolation and invalid-file rejection");
+ 
++    // Foveation uses the same serializer, strict preset schema and atomic settings save.
++    BbSettings::PresetDocument fov{"Foveation live settings", {
++        {"dlss_nr_foveation","1"},{"dlss_nr_fov_center_w","40.125"},
++        {"dlss_nr_fov_contour_w","35.25"},{"dlss_nr_fov_blend","75"},
++        {"dlss_nr_fov_center_x","60"},{"dlss_nr_fov_preview","2"}}};
++    assert(BbSettings::DecodePreset(BbSettings::EncodePreset(fov),decoded,error));
++    assert(BbSettings::ApplyPreset(decoded,error));
++    assert(s.dlss_nr_foveation && s.dlss_nr_fov_blend==75 && s.dlss_nr_fov_preview==2);
++    assert(s.dlss_nr_fov_center_w==40.125f && s.dlss_nr_fov_contour_w==35.25f);
++    assert(BbSettings::Save()); BbSettings::Load();
++    assert(s.dlss_nr_foveation && s.dlss_nr_fov_blend==75 && s.dlss_nr_fov_center_x==60);
++    assert(BbSettings::SliderDefault(s.dlss_nr_fov_blend)==25);
++    for(const auto& [key,value]:fov.settings) {
++        (void)value; assert(BbSettings::PresetGroup(key)==1 && BbSettings::DefaultPresetGraphic(key));
++    }
++    fov.settings={{"dlss_nr_fov_blend","nan"}}; assert(!BbSettings::ApplyPreset(fov,error));
++    assert(s.dlss_nr_fov_blend==75);
++    fov.settings={{"dlss_nr_fov_blend","999"},{"dlss_nr_fov_edge","-10"}};
++    assert(!BbSettings::ApplyPreset(fov,error));
++    assert(s.dlss_nr_fov_blend==75 && s.dlss_nr_fov_edge==50);
++    fov.settings={{"dlss_nr_fov_contour_w","90"},{"dlss_nr_fov_center_w","10"}};
++    assert(BbSettings::ApplyPreset(fov,error));
++    assert(s.dlss_nr_fov_center_w==10 && s.dlss_nr_fov_contour_w==90);
++    std::puts("PASS: foveation defaults, settings persistence, selective preset round-trip and rejection");
++    std::filesystem::remove_all(library_root);
+     std::filesystem::remove(temporary);
+     std::puts("PASS: settings save keeps other keys, menu position");
+ }
+diff --git a/gpu/shim/bbport_custom_presets.inc b/gpu/shim/bbport_custom_presets.inc
+--- a/gpu/shim/bbport_custom_presets.inc
++++ b/gpu/shim/bbport_custom_presets.inc
+@@ -1,6 +1,7 @@
+ // Included inside BbSettings after SnapshotSettings, sharing the settings decoder.
+ void PopulateSettingsView(Values& values, const SettingList& settings) {
+     for (const auto& [key, value] : settings) Set(values, key, value);
++    ClampFoveation(values);
+ }
+ int PresetGroup(const std::string& key) {
+     if (key.starts_with("dlss_nr")) return 1;
